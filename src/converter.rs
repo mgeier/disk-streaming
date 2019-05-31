@@ -118,28 +118,25 @@ where
         self.data.end_of_input = 0;
         Ok(())
     }
+}
 
-    fn update_input_data<F>(&mut self, file: &mut F, frames: usize) -> Result<(), Error>
-    where
-        F: crate::file::ProvideBlocks,
-    {
-        let block = file.next_block(frames)?;
-        if block.len() == 0 {
-            self.data.end_of_input = 1;
-        } else {
-            let iterators = block.channel_iterators();
-            let channels = iterators.len();
-            for (i, source) in iterators.iter_mut().enumerate() {
-                let start_idx = self.data.input_frames as usize * channels + i;
-                let target = self.buffer_in[start_idx..].iter_mut().step_by(channels);
-                for (a, b) in source.zip(target) {
-                    *b = a
-                }
-            }
-            self.data.input_frames += block.len() as c_long;
+fn update_input_buffer<F>(
+    file: &mut F,
+    buffer: &mut [f32],
+) -> Result<usize, Error>
+where
+    F: crate::file::ProvideBlocks,
+{
+    let block = file.next_block(buffer.len() / file.channels())?;
+    let iterators = block.channel_iterators();
+    let channels = iterators.len();
+    for (i, source) in iterators.iter_mut().enumerate() {
+        let target = buffer[i..].iter_mut().step_by(channels);
+        for (a, b) in source.zip(target) {
+            *b = a
         }
-        Ok(())
     }
+    Ok(block.len())
 }
 
 // TODO: separate error type for SRC initialization?
@@ -224,15 +221,17 @@ where
         loop {
             // Get new input data (and append to already existing input data)
 
-            let frames = self.buffer_in.len() / channels - self.data.input_frames as usize;
-            if frames > 0 {
-                // TODO: there should probably be a safer way to do this?
-                let mut file = std::mem::replace(&mut *self.file, unsafe { std::mem::zeroed() });
-                match &mut file {
-                    AudioFile::Vorbis(file) => self.update_input_data(file, frames)?,
-                    AudioFile::Resampled(file) => self.update_input_data(file, frames)?,
+            let buffer = &mut self.buffer_in[(self.data.input_frames as usize * channels)..];
+            if !buffer.is_empty() {
+                let new_frames = match &mut *self.file {
+                    AudioFile::Vorbis(file) => update_input_buffer(file, buffer)?,
+                    AudioFile::Resampled(file) => update_input_buffer(file, buffer)?,
+                };
+                if new_frames == 0 {
+                    self.data.end_of_input = 1;
+                } else {
+                    self.data.input_frames += new_frames as c_long;
                 }
-                std::mem::forget(std::mem::replace(&mut *self.file, file));
             }
 
             // Call libsamplerate to get new output data
@@ -270,5 +269,9 @@ where
                 break Ok(&mut self.current_block);
             }
         }
+    }
+
+    fn channels(&self) -> usize {
+        self.file.channels()
     }
 }

@@ -37,7 +37,6 @@ where
         use AudioFile::*;
         match self {
             Vorbis(f) => f.channels(),
-            //Wav(f) => f.channels(),
             Resampled(f) => f.channels(),
         }
     }
@@ -62,6 +61,7 @@ where
 pub trait ProvideBlocks {
     type Block: Block;
     fn next_block(&mut self, frames: usize) -> Result<&mut Self::Block, Error>;
+    fn channels(&self) -> usize;
 }
 
 pub trait Block {
