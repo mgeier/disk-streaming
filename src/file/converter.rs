@@ -60,12 +60,11 @@ where
 
         let buffer_in = vec![0.0; buffer_size * channels];
         let mut buffer_out = vec![0.0; buffer_size * channels];
-        let ptr_out = buffer_out.as_mut_ptr();
 
         Ok(Converter {
             data: libsamplerate_sys::SRC_DATA {
                 data_in: buffer_in.as_ptr(),
-                data_out: ptr_out,
+                data_out: buffer_out.as_mut_ptr(),
                 input_frames: 0,
                 output_frames: 0,
                 input_frames_used: 0,
@@ -77,10 +76,11 @@ where
             state,
             samplerate,
             current_block: Block {
+                ptr: buffer_out.as_ptr(),
                 frames: 0,
                 channels: (0..channels)
-                    .map(|i| Channel {
-                        ptr: unsafe { ptr_out.add(i) },
+                    .map(|_| Channel {
+                        ptr: std::ptr::null(),
                         stride: channels,
                         len: 0,
                     })
@@ -114,6 +114,7 @@ where
         if result != 0 {
             return Err(LibSamplerateError(result).into());
         }
+        self.data.input_frames = 0;
         self.data.end_of_input = 0;
         Ok(())
     }
@@ -148,6 +149,7 @@ where
 }
 
 pub struct Block {
+    ptr: *const f32,
     frames: usize,
     channels: Box<[Channel]>,
 }
@@ -156,7 +158,8 @@ impl super::Block for Block {
     type Channel = Channel;
 
     fn channel_iterators(&mut self) -> &mut [Channel] {
-        for channel in self.channels.iter_mut() {
+        for (i, channel) in self.channels.iter_mut().enumerate() {
+            channel.ptr = unsafe { self.ptr.add(i) };
             channel.len = self.frames;
         }
         &mut self.channels
