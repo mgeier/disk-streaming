@@ -14,7 +14,7 @@ pub use libsamplerate_sys::SRC_SINC_FASTEST;
 pub use libsamplerate_sys::SRC_SINC_MEDIUM_QUALITY;
 pub use libsamplerate_sys::SRC_ZERO_ORDER_HOLD;
 
-use crate::file::AudioFile;
+use super::AudioFile;
 
 pub struct Converter<R>
 where
@@ -37,9 +37,9 @@ where
 {
     pub fn new(file: AudioFile<R>, samplerate: usize) -> Result<Converter<R>, LibSamplerateError> {
         // TODO: specify type of converter
-        // TODO: specify buffer size?
         let converter_type = SRC_SINC_BEST_QUALITY;
-        let buffer_size = 1024;
+        // TODO: specify buffer size?
+        let buffer_size = 2048;
 
         let channels = file.channels();
         let mut error: c_int = 0;
@@ -152,7 +152,7 @@ pub struct Block {
     channels: Box<[Channel]>,
 }
 
-impl crate::file::Block for Block {
+impl super::Block for Block {
     type Channel = Channel;
 
     fn channel_iterators(&mut self) -> &mut [Channel] {
@@ -188,7 +188,7 @@ impl Iterator for Channel {
     }
 }
 
-impl<R> crate::file::ProvideBlocks for Converter<R>
+impl<R> super::ProvideBlocks for Converter<R>
 where
     R: Read + Seek,
 {

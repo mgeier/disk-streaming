@@ -2,8 +2,7 @@ use std::io::{Read, Seek};
 
 use failure::Error;
 
-use crate::converter::Converter;
-
+pub mod converter;
 pub mod vorbis;
 
 pub enum AudioFile<R>
@@ -11,7 +10,7 @@ where
     R: Read + Seek,
 {
     Vorbis(vorbis::File<R>),
-    Resampled(Converter<R>),
+    Resampled(converter::Converter<R>),
 }
 
 impl<R> AudioFile<R>
