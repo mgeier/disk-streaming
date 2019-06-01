@@ -1,32 +1,43 @@
 use std::thread;
 
+use crossbeam::queue;
+
+type DataConsumer = queue::spsc::Consumer<f32>;
+
 struct FileStreamer {
-    ready_queue: (),
-    seek_queue: (),
-    data_queue: (),
+    ready_consumer: queue::spsc::Consumer<DataConsumer>,
+    seek_producer: queue::spsc::Producer<(usize, DataConsumer)>,
+    data_consumer: Option<DataConsumer>,
     // TODO: JoinHandle?
 }
 
 impl FileStreamer {
     fn new() -> FileStreamer {
-        // TODO: create message queues
+        let (ready_producer, ready_consumer) = queue::spsc::new(1);
 
-        // TODO: create data queue
+        let (seek_producer, seek_consumer) = queue::spsc::new(1);
+
+        let (data_producer, data_consumer) = queue::spsc::new(100_000);
 
         let reader_thread = thread::spawn(move || {
 
-            // TODO: partially fill data queue
+            data_producer;
+
+            seek_consumer;
+
+            // TODO: partially fill data_producer
 
             // TODO: pass data queue to RT thread
+            ready_producer.push(data_consumer);
 
             // TODO: thread::yield_now()
 
             // TODO: continue filling the queue when there is space
         });
         FileStreamer {
-            ready_queue: (),
-            seek_queue: (),
-            data_queue: (),
+            ready_consumer,
+            seek_producer,
+            data_consumer: None,
         }
     }
 
