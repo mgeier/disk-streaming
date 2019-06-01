@@ -61,7 +61,24 @@ where
 pub trait ProvideBlocks {
     type Block: Block;
     fn next_block(&mut self, frames: usize) -> Result<&mut Self::Block, Error>;
-    fn channels(&self) -> usize;
+
+    /// User must ensure `buffer` is long enough, otherwise data will be lost.
+    fn copy_block_to_interleaved(
+        &mut self,
+        frames: usize,
+        buffer: &mut [f32],
+    ) -> Result<usize, Error> {
+        let block = self.next_block(frames)?;
+        let iterators = block.channel_iterators();
+        let channels = iterators.len();
+        for (i, source) in iterators.iter_mut().enumerate() {
+            let target = buffer[i..].iter_mut().step_by(channels);
+            for (a, b) in source.zip(target) {
+                *b = a
+            }
+        }
+        Ok(block.len())
+    }
 }
 
 pub trait Block {

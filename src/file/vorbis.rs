@@ -262,10 +262,6 @@ where
         self.current_block.frames = result as usize;
         Ok(&mut self.current_block)
     }
-
-    fn channels(&self) -> usize {
-        self.channels()
-    }
 }
 
 pub struct Block {

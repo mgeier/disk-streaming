@@ -15,7 +15,6 @@ pub use libsamplerate_sys::SRC_SINC_MEDIUM_QUALITY;
 pub use libsamplerate_sys::SRC_ZERO_ORDER_HOLD;
 
 use crate::file::AudioFile;
-use crate::file::Block as _;
 
 pub struct Converter<R>
 where
@@ -120,25 +119,6 @@ where
     }
 }
 
-fn update_input_buffer<F>(
-    file: &mut F,
-    buffer: &mut [f32],
-) -> Result<usize, Error>
-where
-    F: crate::file::ProvideBlocks,
-{
-    let block = file.next_block(buffer.len() / file.channels())?;
-    let iterators = block.channel_iterators();
-    let channels = iterators.len();
-    for (i, source) in iterators.iter_mut().enumerate() {
-        let target = buffer[i..].iter_mut().step_by(channels);
-        for (a, b) in source.zip(target) {
-            *b = a
-        }
-    }
-    Ok(block.len())
-}
-
 // TODO: separate error type for SRC initialization?
 
 #[derive(Debug, Fail)]
@@ -223,14 +203,16 @@ where
 
             let buffer = &mut self.buffer_in[(self.data.input_frames as usize * channels)..];
             if !buffer.is_empty() {
-                let new_frames = match &mut *self.file {
-                    AudioFile::Vorbis(file) => update_input_buffer(file, buffer)?,
-                    AudioFile::Resampled(file) => update_input_buffer(file, buffer)?,
+                let requested_frames = buffer.len() / channels;
+                use AudioFile::*;
+                let copied_frames = match &mut *self.file {
+                    Vorbis(file) => file.copy_block_to_interleaved(requested_frames, buffer)?,
+                    Resampled(file) => file.copy_block_to_interleaved(requested_frames, buffer)?,
                 };
-                if new_frames == 0 {
+                if copied_frames == 0 {
                     self.data.end_of_input = 1;
                 } else {
-                    self.data.input_frames += new_frames as c_long;
+                    self.data.input_frames += copied_frames as c_long;
                 }
             }
 
@@ -269,9 +251,5 @@ where
                 break Ok(&mut self.current_block);
             }
         }
-    }
-
-    fn channels(&self) -> usize {
-        self.file.channels()
     }
 }
