@@ -61,22 +61,31 @@ pub trait ProvideBlocks {
     type Block: Block;
     fn next_block(&mut self, frames: usize) -> Result<&mut Self::Block, Error>;
 
-    /// User must ensure `buffer` is long enough, otherwise data will be lost.
+    /// Panics if `buffer` is not long enough.
     fn copy_block_to_interleaved(
         &mut self,
         frames: usize,
         buffer: &mut [f32],
     ) -> Result<usize, Error> {
         let block = self.next_block(frames)?;
+        let frames = block.len();
         let iterators = block.channel_iterators();
         let channels = iterators.len();
+        for frame in 0..frames {
+            for channel in 0..channels {
+                buffer[frame * channels + channel] = iterators[channel].next().unwrap();
+            }
+        }
+        // TODO: benchmark alternative implementation
+        /*
         for (i, source) in iterators.iter_mut().enumerate() {
             let target = buffer[i..].iter_mut().step_by(channels);
             for (a, b) in source.zip(target) {
                 *b = a
             }
         }
-        Ok(block.len())
+        */
+        Ok(frames)
     }
 }
 
