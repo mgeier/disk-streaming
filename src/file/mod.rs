@@ -17,6 +17,8 @@ impl<R> AudioFile<R>
 where
     R: Read + Seek,
 {
+    // TODO: loop/repeat, skip, duration ... use builder pattern?
+
     pub fn new(reader: R) -> Result<AudioFile<R>, Error> {
         // TODO: try all available file types
 

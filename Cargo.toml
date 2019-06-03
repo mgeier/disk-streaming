@@ -5,7 +5,7 @@ authors = ["Matthias Geier <Matthias.Geier@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-crossbeam = { git = "https://github.com/stjepang/crossbeam.git", branch = "spsc" }
+crossbeam = { git = "https://github.com/stjepang/crossbeam.git", rev = "d1736eff0834302e30bda0d259c920b6d7ed0a58" }
 errno = "*"
 failure = "*"
 libc = "*"

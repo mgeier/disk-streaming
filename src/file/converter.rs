@@ -100,8 +100,8 @@ where
         self.file.channels()
     }
 
+    /// This might be one less than the actual number of frames produced by libsamplerate
     pub fn len(&self) -> usize {
-        // TODO: is this correct? what about rounding errors?
         (self.file.len() as f64 * self.data.src_ratio) as usize
     }
 
