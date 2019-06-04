@@ -31,6 +31,8 @@ where
     current_block: Block,
 }
 
+unsafe impl<R: Read + Seek + Send> Send for Converter<R> {}
+
 impl<R> Converter<R>
 where
     R: Read + Seek,

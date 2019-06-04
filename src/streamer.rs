@@ -1,5 +1,8 @@
 use std::fs;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::thread;
 
 use crossbeam::queue;
@@ -54,13 +57,13 @@ fn make_data_queue(
     )
 }
 
-struct BlockWrapper<'b> {
+struct WriteBlock<'b> {
     // NB: Option in order to be able to move Block in drop()
     block: Option<Block>,
     queue: &'b mut queue::spsc::Producer<Block>,
 }
 
-impl<'b> Drop for BlockWrapper<'b> {
+impl<'b> Drop for WriteBlock<'b> {
     fn drop(&mut self) {
         if let Some(block) = self.block.take() {
             self.queue.push(block).unwrap();
@@ -68,14 +71,15 @@ impl<'b> Drop for BlockWrapper<'b> {
     }
 }
 
-impl<'b> BlockWrapper<'b> {
+impl<'b> WriteBlock<'b> {
+    // TODO: rename to "source()"?
     fn channel(&mut self, index: usize) -> &mut [f32] {
         &mut self.block.as_mut().unwrap().channels[index]
     }
 }
 
 impl DataProducer {
-    fn write_block(&mut self) -> Option<BlockWrapper> {
+    fn write_block(&mut self) -> Option<WriteBlock> {
         let mut block = match self.recycling_consumer.pop() {
             Ok(block) => block,
             _ => return None,
@@ -87,7 +91,7 @@ impl DataProducer {
                 *value = 0.0f32;
             }
         }
-        Some(BlockWrapper {
+        Some(WriteBlock {
             block: Some(block),
             queue: &mut self.data_producer,
         })
@@ -98,8 +102,16 @@ impl DataProducer {
     }
 }
 
+impl DataConsumer {
+    fn clear(&mut self) {
+        while let Ok(data) = self.data_consumer.pop() {
+            self.recycling_producer.push(data).unwrap()
+        }
+    }
+}
+
 pub struct FileStreamer {
-    ready_consumer: queue::spsc::Consumer<DataConsumer>,
+    ready_consumer: queue::spsc::Consumer<(usize, DataConsumer)>,
     seek_producer: queue::spsc::Producer<(usize, Option<DataConsumer>)>,
     data_consumer: Option<DataConsumer>,
     reader_thread: Option<thread::JoinHandle<()>>,
@@ -109,17 +121,38 @@ pub struct FileStreamer {
 // TODO: make less public
 pub struct PlaylistEntry {
     pub start: usize,
-    //end: Option<usize>,
-    // TODO: make generic?
+    pub end: Option<usize>,
     pub file: AudioFile<fs::File>,
     pub sources: Box<[usize]>,
+}
+
+struct ActiveIter<'a> {
+    block_start: usize,
+    block_end: usize,
+    inner: std::slice::Iter<'a, PlaylistEntry>,
+}
+
+impl<'a> Iterator for ActiveIter<'a> {
+    type Item = &'a PlaylistEntry;
+
+    fn next(&mut self) -> Option<&'a PlaylistEntry> {
+        while let Some(entry) = self.inner.next() {
+            if entry.start < self.block_end
+                && (entry.end.is_none() || self.block_start < entry.end.unwrap())
+            {
+                return Some(entry);
+            }
+        }
+        None
+    }
 }
 
 // TODO: different API?
 // new(), add_file(), add_file, ..., start_streaming()?
 
 impl FileStreamer {
-    pub fn new(playlist: &[PlaylistEntry]) -> FileStreamer {
+    pub fn new(playlist: Vec<PlaylistEntry>) -> FileStreamer {
+        let playlist = playlist.into_boxed_slice();
 
         // TODO: provide min_buffer_duration in seconds?
         let min_blocks = 3;
@@ -127,7 +160,10 @@ impl FileStreamer {
 
         let (ready_producer, ready_consumer) = queue::spsc::new(1);
 
-        let (seek_producer, seek_consumer) = queue::spsc::new(1);
+        let (seek_producer, seek_consumer): (
+            _,
+            queue::spsc::Consumer<(usize, Option<DataConsumer>)>,
+        ) = queue::spsc::new(1);
 
         let (mut data_producer, data_consumer) = make_data_queue(100, 512, 7);
 
@@ -138,38 +174,54 @@ impl FileStreamer {
         //seek_producer.push((0, data_consumer));
 
         let reader_thread = thread::spawn(move || {
-
             let mut queue = Some(data_consumer);
             let mut seek_frame = 0;
             let mut current_frame = 0;
             let mut buffered_blocks = 0;
 
-            while keep_reading.load(Ordering::Acquire) {
+            let active_files = || {
+                ActiveIter {
+                    block_start: current_frame,
+                    // TODO:
+                    //block_end: current_frame + blocksize,
+                    block_end: current_frame + 27,
+                    inner: playlist.iter(),
+                }
+            };
 
+            while keep_reading.load(Ordering::Acquire) {
                 // TODO: memoize "active" files?
 
                 if let Ok((frame, data_consumer)) = seek_consumer.pop() {
-                    queue = queue.or(data_consumer);
+                    //if frame != seek_frame || frame != current_frame {
+                    if frame != seek_frame || data_consumer.is_some() {
+                        queue = queue.or(data_consumer);
 
-                    if frame != seek_frame {
-
-                        // TODO: stop everything, reset everything, clear queue and seek
-
-                        // TODO: look for "active" files, call seek()
-
-                        seek_frame = frame;
-                        current_frame = frame;
                         buffered_blocks = 0;
+                        current_frame = frame;
+                        seek_frame = frame;
+
+                        // TODO: iterate over "active" files, call seek()
+
+                        if let Some(queue) = queue.as_mut() {
+                            queue.clear();
+
+                            // TODO: get one block of data?
+
+                            buffered_blocks = 1;
+                            //current_frame = ???;
+                        }
                     }
                 }
+                // TODO: simplify this condition?
                 if current_frame <= seek_frame && queue.is_none() {
                     // NB: Audio thread has outdated queue, we have to wait for next "seek" message
-                    continue
+                    continue;
                 }
 
                 if data_producer.is_full() {
                     thread::yield_now();
-                    continue
+                    continue;
                 }
 
                 // TODO: get data from "active" files
@@ -186,7 +238,7 @@ impl FileStreamer {
                 // TODO: reverse the conditions?
                 if buffered_blocks >= min_blocks {
                     if let Some(queue) = queue.take() {
-                        ready_producer.push(queue);
+                        ready_producer.push((seek_frame, queue));
                     }
                 }
             }
@@ -215,7 +267,8 @@ impl FileStreamer {
 
 impl Drop for FileStreamer {
     fn drop(&mut self) {
-        self.reader_thread_keep_reading.store(false, Ordering::Release);
+        self.reader_thread_keep_reading
+            .store(false, Ordering::Release);
         self.reader_thread.take().unwrap().join();
     }
 }

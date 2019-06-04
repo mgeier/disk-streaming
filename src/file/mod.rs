@@ -20,10 +20,22 @@ where
     // TODO: loop/repeat, skip, duration ... use builder pattern?
 
     pub fn new(reader: R) -> Result<AudioFile<R>, Error> {
-        // TODO: try all available file types
+        // TODO: try all available file types (call reader.seek(0) in between)
 
-        let file = vorbis::File::new(reader)?;
-        Ok(AudioFile::Vorbis(file))
+        let file = AudioFile::Vorbis(vorbis::File::new(reader)?);
+
+        Ok(file)
+    }
+
+    pub fn with_samplerate(reader: R, samplerate: usize) -> Result<AudioFile<R>, Error> {
+        let file = AudioFile::new(reader)?;
+        if file.samplerate() == samplerate {
+            Ok(file)
+        } else {
+            Ok(AudioFile::Resampled(converter::Converter::new(
+                file, samplerate,
+            )?))
+        }
     }
 
     pub fn samplerate(&self) -> usize {
