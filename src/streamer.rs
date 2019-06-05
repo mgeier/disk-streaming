@@ -7,7 +7,7 @@ use std::thread;
 
 use crossbeam::queue;
 
-use crate::file::AudioFile;
+use crate::file::{AudioFile, ProvideBlocks};
 
 struct Block {
     channels: Box<[Box<[f32]>]>,
@@ -72,6 +72,10 @@ impl<'b> Drop for WriteBlock<'b> {
 }
 
 impl<'b> WriteBlock<'b> {
+    fn sources(&mut self) -> &mut [Box<[f32]>] {
+        &mut self.block.as_mut().unwrap().channels
+    }
+
     // TODO: rename to "source()"?
     fn channel(&mut self, index: usize) -> &mut [f32] {
         &mut self.block.as_mut().unwrap().channels[index]
@@ -123,19 +127,19 @@ pub struct PlaylistEntry {
     pub start: usize,
     pub end: Option<usize>,
     pub file: AudioFile<fs::File>,
-    pub sources: Box<[usize]>,
+    pub sources: Box<[Option<usize>]>,
 }
 
 struct ActiveIter<'a> {
     block_start: usize,
     block_end: usize,
-    inner: std::slice::Iter<'a, PlaylistEntry>,
+    inner: std::slice::IterMut<'a, PlaylistEntry>,
 }
 
 impl<'a> Iterator for ActiveIter<'a> {
-    type Item = &'a PlaylistEntry;
+    type Item = &'a mut PlaylistEntry;
 
-    fn next(&mut self) -> Option<&'a PlaylistEntry> {
+    fn next(&mut self) -> Option<&'a mut PlaylistEntry> {
         while let Some(entry) = self.inner.next() {
             if entry.start < self.block_end
                 && (entry.end.is_none() || self.block_start < entry.end.unwrap())
@@ -147,12 +151,27 @@ impl<'a> Iterator for ActiveIter<'a> {
     }
 }
 
+fn fill_channels<D>(file: &mut PlaylistEntry, blocksize: usize, offset: usize, target: &mut [D])
+where
+    D: std::ops::DerefMut<Target = [f32]>,
+{
+    match &mut file.file {
+        // TODO: error handling
+        AudioFile::Vorbis(vf) => vf
+            .fill_channels(&file.sources, blocksize, offset, target)
+            .unwrap(),
+        AudioFile::Resampled(conv) => conv
+            .fill_channels(&file.sources, blocksize, offset, target)
+            .unwrap(),
+    }
+}
+
 // TODO: different API?
 // new(), add_file(), add_file, ..., start_streaming()?
 
 impl FileStreamer {
-    pub fn new(playlist: Vec<PlaylistEntry>) -> FileStreamer {
-        let playlist = playlist.into_boxed_slice();
+    pub fn new(playlist: Vec<PlaylistEntry>, blocksize: usize) -> FileStreamer {
+        let mut playlist = playlist.into_boxed_slice();
 
         // TODO: provide min_buffer_duration in seconds?
         let min_blocks = 3;
@@ -177,21 +196,10 @@ impl FileStreamer {
             let mut queue = Some(data_consumer);
             let mut seek_frame = 0;
             let mut current_frame = 0;
+            // TODO: use current_frame - seek_frame
             let mut buffered_blocks = 0;
 
-            let active_files = || {
-                ActiveIter {
-                    block_start: current_frame,
-                    // TODO:
-                    //block_end: current_frame + blocksize,
-                    block_end: current_frame + 27,
-                    inner: playlist.iter(),
-                }
-            };
-
             while keep_reading.load(Ordering::Acquire) {
-                // TODO: memoize "active" files?
-
                 if let Ok((frame, data_consumer)) = seek_consumer.pop() {
                     //if frame != seek_frame || frame != current_frame {
                     if frame != seek_frame || data_consumer.is_some() {
@@ -201,15 +209,32 @@ impl FileStreamer {
                         current_frame = frame;
                         seek_frame = frame;
 
-                        // TODO: iterate over "active" files, call seek()
+                        let queue_block = match queue.as_mut() {
+                            Some(queue) => {
+                                queue.clear();
+                                data_producer.write_block()
+                            }
+                            _ => None,
+                        };
 
-                        if let Some(queue) = queue.as_mut() {
-                            queue.clear();
-
-                            // TODO: get one block of data?
-
+                        if let Some(mut queue_block) = queue_block {
+                            let active_files = ActiveIter {
+                                block_start: current_frame,
+                                block_end: current_frame + blocksize,
+                                inner: playlist.iter_mut(),
+                            };
+                            for ref mut file in active_files {
+                                let offset = if file.start < seek_frame {
+                                    file.file.seek(seek_frame - file.start);
+                                    0
+                                } else {
+                                    file.file.seek(0);
+                                    file.start - seek_frame
+                                };
+                                fill_channels(file, blocksize, offset, queue_block.sources());
+                            }
                             buffered_blocks = 1;
-                            //current_frame = ???;
+                            current_frame += blocksize;
                         }
                     }
                 }
@@ -225,6 +250,7 @@ impl FileStreamer {
                 }
 
                 // TODO: get data from "active" files
+                // TODO: on "new" files: seek(0)
 
                 let mut block = data_producer.write_block().unwrap();
                 let channel0 = block.channel(0);

@@ -22,10 +22,10 @@ fn main() -> Result<(), Error> {
         start: 0,
         end: Some(file.len()),
         file,
-        sources: Box::new([0, 1]),
+        sources: Box::new([Some(0), Some(1)]),
     });
 
-    let streamer = FileStreamer::new(playlist);
+    let streamer = FileStreamer::new(playlist, 1024);
 
     // TODO: get some data
 

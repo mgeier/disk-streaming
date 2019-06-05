@@ -1,5 +1,3 @@
-// TODO: what about rounding error when calculating resampled length?
-
 use std::ffi::CStr;
 use std::fmt;
 use std::io::{Read, Seek};

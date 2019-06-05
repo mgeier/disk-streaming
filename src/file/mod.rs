@@ -1,4 +1,5 @@
 use std::io::{Read, Seek};
+use std::ops::IndexMut;
 
 use failure::Error;
 
@@ -100,6 +101,35 @@ pub trait ProvideBlocks {
         }
         */
         Ok(frames)
+    }
+
+    fn fill_channels<D>(
+        &mut self,
+        channel_map: &[Option<usize>],
+        blocksize: usize,
+        offset: usize,
+        channels: &mut [D],
+    ) -> Result<(), Error>
+    where
+        D: std::ops::DerefMut<Target = [f32]>,
+    {
+        let mut offset = offset;
+        while offset < blocksize {
+            let file_block = self.next_block(blocksize - offset)?;
+            let iterators = file_block.channel_iterators();
+            for (i, &channel) in channel_map.iter().enumerate() {
+                if let Some(channel) = channel {
+                    // TODO: use iterators[i]?
+                    for (a, b) in
+                        IndexMut::index_mut(iterators, i).zip(&mut channels[channel][offset..])
+                    {
+                        *b = a;
+                    }
+                }
+            }
+            offset += file_block.len();
+        }
+        Ok(())
     }
 }
 
