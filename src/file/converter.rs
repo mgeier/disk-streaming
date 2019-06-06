@@ -1,6 +1,5 @@
 use std::ffi::CStr;
 use std::fmt;
-use std::io::{Read, Seek};
 
 use failure::{Error, Fail};
 use libc::{c_int, c_long};
@@ -12,14 +11,11 @@ pub use libsamplerate_sys::SRC_SINC_FASTEST;
 pub use libsamplerate_sys::SRC_SINC_MEDIUM_QUALITY;
 pub use libsamplerate_sys::SRC_ZERO_ORDER_HOLD;
 
-use super::AudioFile;
-
-pub struct Converter<R>
+pub struct Converter<F>
 where
-    R: Read + Seek,
+    F: super::AudioFile,
 {
-    // Box to avoid recursive type
-    file: Box<AudioFile<R>>,
+    file: F,
     state: *mut libsamplerate_sys::SRC_STATE,
     // http://www.mega-nerd.com/SRC/api_misc.html#SRC_DATA
     data: libsamplerate_sys::SRC_DATA,
@@ -29,13 +25,13 @@ where
     current_block: Block,
 }
 
-unsafe impl<R: Read + Seek + Send> Send for Converter<R> {}
+unsafe impl<F: super::AudioFile + Send> Send for Converter<F> {}
 
-impl<R> Converter<R>
+impl<F> Converter<F>
 where
-    R: Read + Seek,
+    F: super::AudioFile,
 {
-    pub fn new(file: AudioFile<R>, samplerate: usize) -> Result<Converter<R>, LibSamplerateError> {
+    pub fn new(file: F, samplerate: usize) -> Result<Converter<F>, LibSamplerateError> {
         // TODO: specify type of converter
         let converter_type = SRC_SINC_BEST_QUALITY;
         // TODO: specify buffer size?
@@ -72,7 +68,7 @@ where
                 end_of_input: 0,
                 src_ratio: samplerate as f64 / file.samplerate() as f64,
             },
-            file: Box::new(file),
+            file,
             state,
             samplerate,
             current_block: Block {
@@ -90,33 +86,6 @@ where
             buffer_in: buffer_in.into_boxed_slice(),
             buffer_out: buffer_out.into_boxed_slice(),
         })
-    }
-
-    pub fn samplerate(&self) -> usize {
-        self.samplerate
-    }
-
-    pub fn channels(&self) -> usize {
-        self.file.channels()
-    }
-
-    /// This might be one less than the actual number of frames produced by libsamplerate
-    pub fn len(&self) -> usize {
-        (self.file.len() as f64 * self.data.src_ratio) as usize
-    }
-
-    pub fn seek(&mut self, frame: usize) -> Result<(), Error> {
-        // TODO: is this correct? what about rounding errors?
-        self.file
-            .seek((frame as f64 / self.data.src_ratio) as usize)?;
-        // http://www.mega-nerd.com/SRC/api_full.html#Reset
-        let result = unsafe { libsamplerate_sys::src_reset(self.state) };
-        if result != 0 {
-            return Err(LibSamplerateError(result).into());
-        }
-        self.data.input_frames = 0;
-        self.data.end_of_input = 0;
-        Ok(())
     }
 }
 
@@ -137,9 +106,9 @@ impl fmt::Display for LibSamplerateError {
     }
 }
 
-impl<R> Drop for Converter<R>
+impl<F> Drop for Converter<F>
 where
-    R: Read + Seek,
+    F: super::AudioFile,
 {
     fn drop(&mut self) {
         unsafe {
@@ -165,7 +134,7 @@ impl super::Block for Block {
         &mut self.channels
     }
 
-    fn len(&self) -> usize {
+    fn frames(&self) -> usize {
         self.frames
     }
 }
@@ -191,11 +160,38 @@ impl Iterator for Channel {
     }
 }
 
-impl<R> super::ProvideBlocks for Converter<R>
+impl<F> super::AudioFile for Converter<F>
 where
-    R: Read + Seek,
+    F: super::AudioFile,
 {
     type Block = Block;
+
+    fn samplerate(&self) -> usize {
+        self.samplerate
+    }
+
+    fn channels(&self) -> usize {
+        self.file.channels()
+    }
+
+    /// This might be one less than the actual number of frames produced by libsamplerate
+    fn frames(&self) -> usize {
+        (self.file.frames() as f64 * self.data.src_ratio) as usize
+    }
+
+    fn seek(&mut self, frame: usize) -> Result<(), Error> {
+        // TODO: is this correct? what about rounding errors?
+        self.file
+            .seek((frame as f64 / self.data.src_ratio) as usize)?;
+        // http://www.mega-nerd.com/SRC/api_full.html#Reset
+        let result = unsafe { libsamplerate_sys::src_reset(self.state) };
+        if result != 0 {
+            return Err(LibSamplerateError(result).into());
+        }
+        self.data.input_frames = 0;
+        self.data.end_of_input = 0;
+        Ok(())
+    }
 
     fn next_block(&mut self, max_len: usize) -> Result<&mut Block, Error> {
         let channels = self.file.channels();
@@ -207,11 +203,7 @@ where
             let buffer = &mut self.buffer_in[(self.data.input_frames as usize * channels)..];
             if !buffer.is_empty() {
                 let requested_frames = buffer.len() / channels;
-                use AudioFile::*;
-                let copied_frames = match &mut *self.file {
-                    Vorbis(file) => file.copy_block_to_interleaved(requested_frames, buffer)?,
-                    Resampled(file) => file.copy_block_to_interleaved(requested_frames, buffer)?,
-                };
+                let copied_frames = self.file.copy_block_to_interleaved(requested_frames, buffer)?;
                 if copied_frames == 0 {
                     self.data.end_of_input = 1;
                 } else {

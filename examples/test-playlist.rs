@@ -3,8 +3,7 @@ use std::fs;
 use failure::Error;
 
 use disk_streaming::{
-    file::AudioFile,
-    streamer::{FileStreamer, PlaylistEntry},
+    streamer::{load_audio_file, FileStreamer, PlaylistEntry},
 };
 
 fn main() -> Result<(), Error> {
@@ -15,12 +14,12 @@ fn main() -> Result<(), Error> {
     // TODO: get "end" from file length?
 
     let file = fs::File::open("marimba.ogg")?;
-    let file = AudioFile::with_samplerate(file, 44_100)?;
+    let file = load_audio_file(file, 44_100)?;
     //let file = AudioFile::with_samplerate(file, 48_000)?;
 
     playlist.push(PlaylistEntry {
         start: 0,
-        end: Some(file.len()),
+        end: Some(file.frames()),
         file,
         sources: Box::new([Some(0), Some(1)]),
     });

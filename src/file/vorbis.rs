@@ -216,8 +216,15 @@ where
             })
         }
     }
+}
 
-    pub fn seek(&mut self, frame: usize) -> Result<(), Error> {
+impl<R> super::AudioFile for File<R>
+where
+    R: Read + Seek,
+{
+    type Block = Block;
+
+    fn seek(&mut self, frame: usize) -> Result<(), Error> {
         // https://xiph.org/vorbis/doc/vorbisfile/ov_pcm_seek.html
         let result =
             unsafe { vorbisfile_sys::ov_pcm_seek(&mut self.ov_struct, frame as ogg_int64_t) };
@@ -228,24 +235,17 @@ where
         }
     }
 
-    pub fn samplerate(&self) -> usize {
+    fn samplerate(&self) -> usize {
         self.samplerate
     }
 
-    pub fn channels(&self) -> usize {
+    fn channels(&self) -> usize {
         self.channels
     }
 
-    pub fn len(&self) -> usize {
+    fn frames(&self) -> usize {
         self.frames
     }
-}
-
-impl<R> super::ProvideBlocks for File<R>
-where
-    R: Read + Seek,
-{
-    type Block = Block;
 
     fn next_block(&mut self, max_len: usize) -> Result<&mut Block, Error> {
         let mut current_section: c_int = 0;
@@ -284,7 +284,7 @@ impl super::Block for Block {
         &mut self.channels
     }
 
-    fn len(&self) -> usize {
+    fn frames(&self) -> usize {
         self.frames
     }
 }

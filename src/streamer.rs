@@ -1,13 +1,29 @@
-use std::fs;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::io::{Read, Seek};
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use std::thread;
 
 use crossbeam::queue;
+use failure::Error;
 
-use crate::file::{AudioFile, ProvideBlocks};
+use crate::file::{vorbis, converter, AudioFile, DynamicAudioFile};
+
+// TODO: loop/repeat, skip, duration ...
+
+pub fn load_audio_file<R>(reader: R, samplerate: usize) -> Result<Box<dyn DynamicAudioFile<Box<[f32]>>>, Error>
+where
+    R: Read + Seek + 'static,
+{
+    let file = vorbis::File::new(reader)?;
+
+    // TODO: try all available file types (call reader.seek(0) in between)
+
+    if file.samplerate() == samplerate {
+        Ok(Box::new(file))
+    } else {
+        Ok(Box::new(converter::Converter::new(file, samplerate)?))
+    }
+}
+
 
 struct Block {
     channels: Box<[Box<[f32]>]>,
@@ -126,7 +142,7 @@ pub struct FileStreamer {
 pub struct PlaylistEntry {
     pub start: usize,
     pub end: Option<usize>,
-    pub file: AudioFile<fs::File>,
+    pub file: Box<DynamicAudioFile<Box<[f32]>> + Send>,
     pub sources: Box<[Option<usize>]>,
 }
 
@@ -148,21 +164,6 @@ impl<'a> Iterator for ActiveIter<'a> {
             }
         }
         None
-    }
-}
-
-fn fill_channels<D>(file: &mut PlaylistEntry, blocksize: usize, offset: usize, target: &mut [D])
-where
-    D: std::ops::DerefMut<Target = [f32]>,
-{
-    match &mut file.file {
-        // TODO: error handling
-        AudioFile::Vorbis(vf) => vf
-            .fill_channels(&file.sources, blocksize, offset, target)
-            .unwrap(),
-        AudioFile::Resampled(conv) => conv
-            .fill_channels(&file.sources, blocksize, offset, target)
-            .unwrap(),
     }
 }
 
@@ -231,7 +232,7 @@ impl FileStreamer {
                                     file.file.seek(0);
                                     file.start - seek_frame
                                 };
-                                fill_channels(file, blocksize, offset, queue_block.sources());
+                                file.file.fill_channels(&file.sources, blocksize, offset, queue_block.sources());
                             }
                             buffered_blocks = 1;
                             current_frame += blocksize;

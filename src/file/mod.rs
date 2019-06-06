@@ -1,4 +1,3 @@
-use std::io::{Read, Seek};
 use std::ops::IndexMut;
 
 use failure::Error;
@@ -6,74 +5,14 @@ use failure::Error;
 pub mod converter;
 pub mod vorbis;
 
-pub enum AudioFile<R>
-where
-    R: Read + Seek,
+pub trait AudioFile
 {
-    Vorbis(vorbis::File<R>),
-    Resampled(converter::Converter<R>),
-}
-
-impl<R> AudioFile<R>
-where
-    R: Read + Seek,
-{
-    // TODO: loop/repeat, skip, duration ... use builder pattern?
-
-    pub fn new(reader: R) -> Result<AudioFile<R>, Error> {
-        // TODO: try all available file types (call reader.seek(0) in between)
-
-        let file = AudioFile::Vorbis(vorbis::File::new(reader)?);
-
-        Ok(file)
-    }
-
-    pub fn with_samplerate(reader: R, samplerate: usize) -> Result<AudioFile<R>, Error> {
-        let file = AudioFile::new(reader)?;
-        if file.samplerate() == samplerate {
-            Ok(file)
-        } else {
-            Ok(AudioFile::Resampled(converter::Converter::new(
-                file, samplerate,
-            )?))
-        }
-    }
-
-    pub fn samplerate(&self) -> usize {
-        use AudioFile::*;
-        match self {
-            Vorbis(f) => f.samplerate(),
-            Resampled(f) => f.samplerate(),
-        }
-    }
-
-    pub fn channels(&self) -> usize {
-        use AudioFile::*;
-        match self {
-            Vorbis(f) => f.channels(),
-            Resampled(f) => f.channels(),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        use AudioFile::*;
-        match self {
-            Vorbis(f) => f.len(),
-            Resampled(f) => f.len(),
-        }
-    }
-
-    pub fn seek(&mut self, frame: usize) -> Result<(), Error> {
-        use AudioFile::*;
-        match self {
-            Vorbis(f) => f.seek(frame),
-            Resampled(f) => f.seek(frame),
-        }
-    }
-}
-
-pub trait ProvideBlocks {
     type Block: Block;
+
+    fn samplerate(&self) -> usize;
+    fn channels(&self) -> usize;
+    fn frames(&self) -> usize;
+    fn seek(&mut self, frame: usize) -> Result<(), Error>;
     fn next_block(&mut self, frames: usize) -> Result<&mut Self::Block, Error>;
 
     /// Panics if `buffer` is not long enough.
@@ -83,7 +22,7 @@ pub trait ProvideBlocks {
         buffer: &mut [f32],
     ) -> Result<usize, Error> {
         let block = self.next_block(frames)?;
-        let frames = block.len();
+        let frames = block.frames();
         let iterators = block.channel_iterators();
         let channels = iterators.len();
         for frame in 0..frames {
@@ -127,7 +66,7 @@ pub trait ProvideBlocks {
                     }
                 }
             }
-            offset += file_block.len();
+            offset += file_block.frames();
         }
         Ok(())
     }
@@ -136,8 +75,75 @@ pub trait ProvideBlocks {
 pub trait Block {
     type Channel: Iterator<Item = f32>;
     fn channel_iterators(&mut self) -> &mut [Self::Channel];
-    fn len(&self) -> usize;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
+    fn frames(&self) -> usize;
+}
+
+pub trait DynamicAudioFile<D>
+where
+    D: std::ops::DerefMut<Target = [f32]>,
+{
+    fn samplerate(&self) -> usize;
+    fn channels(&self) -> usize;
+    fn frames(&self) -> usize;
+    fn seek(&mut self, frame: usize) -> Result<(), Error>;
+
+    /*
+    fn copy_block_to_interleaved(
+        &mut self,
+        frames: usize,
+        buffer: &mut [f32],
+    ) -> Result<usize, Error>;
+    */
+
+    fn fill_channels(
+        &mut self,
+        channel_map: &[Option<usize>],
+        blocksize: usize,
+        offset: usize,
+        channels: &mut [D],
+    ) -> Result<(), Error>;
+}
+
+impl<B, F, D> DynamicAudioFile<D> for F
+where
+    B: Block,
+    F: AudioFile<Block = B>,
+    D: std::ops::DerefMut<Target = [f32]>
+{
+    fn samplerate(&self) -> usize {
+        self.samplerate()
+    }
+
+    fn channels(&self) -> usize {
+        self.channels()
+    }
+
+    fn frames(&self) -> usize {
+        self.frames()
+    }
+
+    fn seek(&mut self, frame: usize) -> Result<(), Error> {
+        self.seek(frame)
+    }
+
+    /*
+    fn copy_block_to_interleaved(
+        &mut self,
+        frames: usize,
+        buffer: &mut [f32],
+    ) -> Result<usize, Error> {
+        self.copy_block_to_interleaved(frames, buffer)
+    }
+    */
+
+    fn fill_channels(
+        &mut self,
+        channel_map: &[Option<usize>],
+        blocksize: usize,
+        offset: usize,
+        channels: &mut [D],
+    ) -> Result<(), Error>
+    {
+        self.fill_channels(channel_map, blocksize, offset, channels)
     }
 }
