@@ -145,10 +145,6 @@ impl DataProducer {
             queue: &mut self.data_producer,
         })
     }
-
-    fn is_full(&self) -> bool {
-        self.data_producer.is_full()
-    }
 }
 
 impl DataConsumer {
@@ -204,7 +200,7 @@ impl FileStreamer {
         let mut playlist = playlist.into_boxed_slice();
 
         // TODO: provide min_buffer_duration in seconds?
-        let min_blocks = 3;
+        let min_frames = 4096;
         // TODO: convert max_buffer_duration into queue capacity
 
         let (ready_producer, ready_consumer) = queue::spsc::new(1);
@@ -219,15 +215,10 @@ impl FileStreamer {
         let reader_thread_keep_reading = Arc::new(AtomicBool::new(true));
         let keep_reading = Arc::clone(&reader_thread_keep_reading);
 
-        // TODO: Initial "seek" message to get the whole process started?
-        //seek_producer.push((0, data_consumer));
-
         let reader_thread = thread::spawn(move || -> Result<(), Error> {
             let mut queue = Some(data_consumer);
             let mut seek_frame = 0;
             let mut current_frame = 0;
-            // TODO: use current_frame - seek_frame
-            let mut buffered_blocks = 0;
 
             while keep_reading.load(Ordering::Acquire) {
                 if let Ok((frame, data_consumer)) = seek_consumer.pop() {
@@ -235,11 +226,10 @@ impl FileStreamer {
                     if frame != seek_frame || data_consumer.is_some() {
                         queue = queue.or(data_consumer);
 
-                        buffered_blocks = 0;
                         current_frame = frame;
                         seek_frame = frame;
 
-                        let queue_block = match queue.as_mut() {
+                        let mut queue_block = match queue.as_mut() {
                             Some(queue) => {
                                 queue.clear();
                                 data_producer.write_block()
@@ -247,57 +237,65 @@ impl FileStreamer {
                             _ => None,
                         };
 
-                        if let Some(mut queue_block) = queue_block {
-                            let active_files = ActiveIter {
-                                block_start: current_frame,
-                                block_end: current_frame + blocksize,
-                                inner: playlist.iter_mut(),
+                        let active_files = ActiveIter {
+                            block_start: current_frame,
+                            block_end: current_frame + blocksize,
+                            inner: playlist.iter_mut(),
+                        };
+
+                        for ref mut file in active_files {
+                            let offset = if file.start < seek_frame {
+                                file.file.seek(seek_frame - file.start)?;
+                                0
+                            } else {
+                                file.file.seek(0)?;
+                                file.start - seek_frame
                             };
-                            for ref mut file in active_files {
-                                let offset = if file.start < seek_frame {
-                                    file.file.seek(seek_frame - file.start)?;
-                                    0
-                                } else {
-                                    file.file.seek(0)?;
-                                    file.start - seek_frame
-                                };
+
+                            if let Some(ref mut queue_block) = queue_block {
                                 file.file.fill_channels(
                                     &file.sources,
                                     blocksize,
                                     offset,
                                     queue_block.sources(),
-                                )?;
+                                    )?;
                             }
-                            buffered_blocks = 1;
+                        }
+                        if queue_block.is_some() {
                             current_frame += blocksize;
                         }
                     }
                 }
-                // TODO: simplify this condition?
                 if current_frame <= seek_frame && queue.is_none() {
                     // NB: Audio thread has outdated queue, we have to wait for next "seek" message
                     continue;
                 }
+                let mut block = match data_producer.write_block() {
+                    Some(block) => block,
+                    None => {
+                        thread::yield_now();
+                        continue;
+                    }
+                };
+                let active_files = ActiveIter {
+                    block_start: current_frame,
+                    block_end: current_frame + blocksize,
+                    inner: playlist.iter_mut(),
+                };
+                for ref mut file in active_files {
+                    let offset = if file.start < current_frame {
+                        0
+                    } else {
+                        file.file.seek(0)?;
+                        file.start - current_frame
+                    };
 
-                if data_producer.is_full() {
-                    thread::yield_now();
-                    continue;
+                    file.file.fill_channels(&file.sources, blocksize, offset, block.sources())?;
                 }
-
-                // TODO: get data from "active" files
-                // TODO: on "new" files: seek(0)
-
-                let mut block = data_producer.write_block().unwrap();
-                let channel0 = block.channel(0);
-                channel0[0] = 1.2;
-                let channel1 = block.channel(1);
-                channel1[0] = 1.2;
-
-                // TODO: update buffered_blocks, current_frame, ...
+                current_frame += blocksize;
 
                 // TODO: get this information from the queue itself?
-                // TODO: reverse the conditions?
-                if buffered_blocks >= min_blocks {
+                if current_frame - seek_frame >= min_frames {
                     if let Some(queue) = queue.take() {
                         // There is only one data queue, push() will always succeed
                         ready_producer.push((seek_frame, queue)).unwrap();
