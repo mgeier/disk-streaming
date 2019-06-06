@@ -218,12 +218,10 @@ where
     }
 }
 
-impl<R> super::AudioFile for File<R>
+impl<R> super::AudioFileBasics for File<R>
 where
     R: Read + Seek,
 {
-    type Block = Block;
-
     fn seek(&mut self, frame: usize) -> Result<(), Error> {
         // https://xiph.org/vorbis/doc/vorbisfile/ov_pcm_seek.html
         let result =
@@ -246,6 +244,13 @@ where
     fn frames(&self) -> usize {
         self.frames
     }
+}
+
+impl<R> super::AudioFileBlocks for File<R>
+where
+    R: Read + Seek,
+{
+    type Block = Block;
 
     fn next_block(&mut self, max_len: usize) -> Result<&mut Block, Error> {
         let mut current_section: c_int = 0;

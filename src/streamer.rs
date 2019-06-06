@@ -1,17 +1,47 @@
 use std::io::{Read, Seek};
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::thread;
 
 use crossbeam::queue;
 use failure::Error;
 
-use crate::file::{vorbis, converter, AudioFile, DynamicAudioFile};
+use crate::file::{converter, vorbis, AudioFileBasics, AudioFileBlocks};
+
+/// Can be used with dynamic dispatch
+pub trait AudioFile: AudioFileBasics {
+    fn fill_channels(
+        &mut self,
+        channel_map: &[Option<usize>],
+        blocksize: usize,
+        offset: usize,
+        channels: &mut [Box<[f32]>],
+    ) -> Result<(), Error>;
+}
+
+impl<B, F> AudioFile for F
+where
+    B: crate::file::Block,
+    F: AudioFileBlocks<Block = B> + AudioFileBasics,
+{
+    fn fill_channels(
+        &mut self,
+        channel_map: &[Option<usize>],
+        blocksize: usize,
+        offset: usize,
+        channels: &mut [Box<[f32]>],
+    ) -> Result<(), Error> {
+        self.fill_channels(channel_map, blocksize, offset, channels)
+    }
+}
 
 // TODO: loop/repeat, skip, duration ...
 
-pub fn load_audio_file<R>(reader: R, samplerate: usize) -> Result<Box<dyn DynamicAudioFile<Box<[f32]>>>, Error>
+pub fn load_audio_file<R>(reader: R, samplerate: usize) -> Result<Box<dyn AudioFile + Send>, Error>
 where
-    R: Read + Seek + 'static,
+    R: Read + Seek + Send + 'static,
 {
     let file = vorbis::File::new(reader)?;
 
@@ -23,7 +53,6 @@ where
         Ok(Box::new(converter::Converter::new(file, samplerate)?))
     }
 }
-
 
 struct Block {
     channels: Box<[Box<[f32]>]>,
@@ -134,7 +163,7 @@ pub struct FileStreamer {
     ready_consumer: queue::spsc::Consumer<(usize, DataConsumer)>,
     seek_producer: queue::spsc::Producer<(usize, Option<DataConsumer>)>,
     data_consumer: Option<DataConsumer>,
-    reader_thread: Option<thread::JoinHandle<()>>,
+    reader_thread: Option<thread::JoinHandle<Result<(), Error>>>,
     reader_thread_keep_reading: Arc<AtomicBool>,
 }
 
@@ -142,7 +171,7 @@ pub struct FileStreamer {
 pub struct PlaylistEntry {
     pub start: usize,
     pub end: Option<usize>,
-    pub file: Box<DynamicAudioFile<Box<[f32]>> + Send>,
+    pub file: Box<AudioFile + Send>,
     pub sources: Box<[Option<usize>]>,
 }
 
@@ -193,7 +222,7 @@ impl FileStreamer {
         // TODO: Initial "seek" message to get the whole process started?
         //seek_producer.push((0, data_consumer));
 
-        let reader_thread = thread::spawn(move || {
+        let reader_thread = thread::spawn(move || -> Result<(), Error> {
             let mut queue = Some(data_consumer);
             let mut seek_frame = 0;
             let mut current_frame = 0;
@@ -226,13 +255,18 @@ impl FileStreamer {
                             };
                             for ref mut file in active_files {
                                 let offset = if file.start < seek_frame {
-                                    file.file.seek(seek_frame - file.start);
+                                    file.file.seek(seek_frame - file.start)?;
                                     0
                                 } else {
-                                    file.file.seek(0);
+                                    file.file.seek(0)?;
                                     file.start - seek_frame
                                 };
-                                file.file.fill_channels(&file.sources, blocksize, offset, queue_block.sources());
+                                file.file.fill_channels(
+                                    &file.sources,
+                                    blocksize,
+                                    offset,
+                                    queue_block.sources(),
+                                )?;
                             }
                             buffered_blocks = 1;
                             current_frame += blocksize;
@@ -265,10 +299,12 @@ impl FileStreamer {
                 // TODO: reverse the conditions?
                 if buffered_blocks >= min_blocks {
                     if let Some(queue) = queue.take() {
-                        ready_producer.push((seek_frame, queue));
+                        // There is only one data queue, push() will always succeed
+                        ready_producer.push((seek_frame, queue)).unwrap();
                     }
                 }
             }
+            Ok(())
         });
         FileStreamer {
             ready_consumer,
@@ -296,6 +332,7 @@ impl Drop for FileStreamer {
     fn drop(&mut self) {
         self.reader_thread_keep_reading
             .store(false, Ordering::Release);
+        // TODO: handle error from closure? log errors?
         self.reader_thread.take().unwrap().join();
     }
 }

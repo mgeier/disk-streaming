@@ -2,9 +2,7 @@ use std::fs;
 
 use failure::Error;
 
-use disk_streaming::{
-    streamer::{load_audio_file, FileStreamer, PlaylistEntry},
-};
+use disk_streaming::streamer::{load_audio_file, FileStreamer, PlaylistEntry};
 
 fn main() -> Result<(), Error> {
     // TODO: specify blocksize and samplerate!

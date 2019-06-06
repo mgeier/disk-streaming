@@ -4,6 +4,8 @@ use std::fmt;
 use failure::{Error, Fail};
 use libc::{c_int, c_long};
 
+use super::{AudioFileBasics, AudioFileBlocks};
+
 // http://www.mega-nerd.com/SRC/api_misc.html#Converters
 pub use libsamplerate_sys::SRC_LINEAR;
 pub use libsamplerate_sys::SRC_SINC_BEST_QUALITY;
@@ -13,7 +15,7 @@ pub use libsamplerate_sys::SRC_ZERO_ORDER_HOLD;
 
 pub struct Converter<F>
 where
-    F: super::AudioFile,
+    F: AudioFileBasics + AudioFileBlocks,
 {
     file: F,
     state: *mut libsamplerate_sys::SRC_STATE,
@@ -25,11 +27,11 @@ where
     current_block: Block,
 }
 
-unsafe impl<F: super::AudioFile + Send> Send for Converter<F> {}
+unsafe impl<F: AudioFileBasics + AudioFileBlocks + Send> Send for Converter<F> {}
 
 impl<F> Converter<F>
 where
-    F: super::AudioFile,
+    F: AudioFileBasics + AudioFileBlocks,
 {
     pub fn new(file: F, samplerate: usize) -> Result<Converter<F>, LibSamplerateError> {
         // TODO: specify type of converter
@@ -108,7 +110,7 @@ impl fmt::Display for LibSamplerateError {
 
 impl<F> Drop for Converter<F>
 where
-    F: super::AudioFile,
+    F: AudioFileBasics + AudioFileBlocks,
 {
     fn drop(&mut self) {
         unsafe {
@@ -160,12 +162,10 @@ impl Iterator for Channel {
     }
 }
 
-impl<F> super::AudioFile for Converter<F>
+impl<F> AudioFileBasics for Converter<F>
 where
-    F: super::AudioFile,
+    F: AudioFileBasics + AudioFileBlocks,
 {
-    type Block = Block;
-
     fn samplerate(&self) -> usize {
         self.samplerate
     }
@@ -192,6 +192,13 @@ where
         self.data.end_of_input = 0;
         Ok(())
     }
+}
+
+impl<F> AudioFileBlocks for Converter<F>
+where
+    F: AudioFileBasics + AudioFileBlocks,
+{
+    type Block = Block;
 
     fn next_block(&mut self, max_len: usize) -> Result<&mut Block, Error> {
         let channels = self.file.channels();
@@ -203,7 +210,9 @@ where
             let buffer = &mut self.buffer_in[(self.data.input_frames as usize * channels)..];
             if !buffer.is_empty() {
                 let requested_frames = buffer.len() / channels;
-                let copied_frames = self.file.copy_block_to_interleaved(requested_frames, buffer)?;
+                let copied_frames = self
+                    .file
+                    .copy_block_to_interleaved(requested_frames, buffer)?;
                 if copied_frames == 0 {
                     self.data.end_of_input = 1;
                 } else {

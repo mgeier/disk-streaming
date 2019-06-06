@@ -2,7 +2,7 @@ use std::fs;
 
 use failure::Error;
 
-use disk_streaming::file::{vorbis, converter::Converter, AudioFile, Block};
+use disk_streaming::file::{converter::Converter, vorbis, AudioFileBasics, AudioFileBlocks, Block};
 
 fn main() -> Result<(), Error> {
     //let file = fs::File::open("ukewave.ogg")?;
