@@ -74,20 +74,21 @@ struct DataProducer {
 }
 
 struct DataConsumer {
+    blocksize: usize,
     data_consumer: queue::spsc::Consumer<Block>,
     recycling_producer: queue::spsc::Producer<Block>,
 }
 
 fn make_data_queue(
     capacity: usize,
-    frames: usize,
+    blocksize: usize,
     channels: usize,
 ) -> (DataProducer, DataConsumer) {
     let (data_producer, data_consumer) = queue::spsc::new(capacity);
     let (recycling_producer, recycling_consumer) = queue::spsc::new(capacity);
     for _ in 0..capacity {
         recycling_producer
-            .push(Block::new(frames, channels))
+            .push(Block::new(blocksize, channels))
             .unwrap();
     }
     (
@@ -96,6 +97,7 @@ fn make_data_queue(
             recycling_consumer,
         },
         DataConsumer {
+            blocksize,
             data_consumer,
             recycling_producer,
         },
@@ -117,13 +119,8 @@ impl<'b> Drop for WriteBlock<'b> {
 }
 
 impl<'b> WriteBlock<'b> {
-    fn sources(&mut self) -> &mut [Box<[f32]>] {
+    fn channels(&mut self) -> &mut [Box<[f32]>] {
         &mut self.block.as_mut().unwrap().channels
-    }
-
-    // TODO: rename to "source()"?
-    fn channel(&mut self, index: usize) -> &mut [f32] {
-        &mut self.block.as_mut().unwrap().channels[index]
     }
 }
 
@@ -140,10 +137,7 @@ impl DataProducer {
                 *value = 0.0f32;
             }
         }
-        Some(WriteBlock {
-            block: Some(block),
-            queue: &mut self.data_producer,
-        })
+        Some(WriteBlock { block: Some(block), queue: &mut self.data_producer })
     }
 }
 
@@ -151,6 +145,20 @@ impl DataConsumer {
     fn clear(&mut self) {
         while let Ok(data) = self.data_consumer.pop() {
             self.recycling_producer.push(data).unwrap()
+        }
+    }
+
+    /// Return value of 0 means un-recoverable error
+    unsafe fn write_channel_ptrs(&mut self, channels: &[*mut f32]) -> usize {
+        if let Ok(block) = self.data_consumer.pop() {
+            for (source, &target) in block.channels.iter().zip(channels) {
+                let target = std::slice::from_raw_parts_mut(target, self.blocksize);
+                target.copy_from_slice(source);
+            }
+            self.recycling_producer.push(block).unwrap();
+            self.blocksize
+        } else {
+            0
         }
     }
 }
@@ -161,6 +169,8 @@ pub struct FileStreamer {
     data_consumer: Option<DataConsumer>,
     reader_thread: Option<thread::JoinHandle<Result<(), Error>>>,
     reader_thread_keep_reading: Arc<AtomicBool>,
+    channels: usize,
+    seek_frame: usize,
 }
 
 // TODO: make less public
@@ -168,7 +178,7 @@ pub struct PlaylistEntry {
     pub start: usize,
     pub end: Option<usize>,
     pub file: Box<AudioFile + Send>,
-    pub sources: Box<[Option<usize>]>,
+    pub channels: Box<[Option<usize>]>,
 }
 
 struct ActiveIter<'a> {
@@ -196,12 +206,13 @@ impl<'a> Iterator for ActiveIter<'a> {
 // new(), add_file(), add_file, ..., start_streaming()?
 
 impl FileStreamer {
-    pub fn new(playlist: Vec<PlaylistEntry>, blocksize: usize) -> FileStreamer {
+    pub fn new(playlist: Vec<PlaylistEntry>, blocksize: usize, channels: usize) -> FileStreamer {
         let mut playlist = playlist.into_boxed_slice();
 
         // TODO: provide min_buffer_duration in seconds?
         let min_frames = 4096;
         // TODO: convert max_buffer_duration into queue capacity
+        let capacity = 100;
 
         let (ready_producer, ready_consumer) = queue::spsc::new(1);
 
@@ -210,7 +221,7 @@ impl FileStreamer {
             queue::spsc::Consumer<(usize, Option<DataConsumer>)>,
         ) = queue::spsc::new(1);
 
-        let (mut data_producer, data_consumer) = make_data_queue(100, 512, 7);
+        let (mut data_producer, data_consumer) = make_data_queue(capacity, blocksize, channels);
 
         let reader_thread_keep_reading = Arc::new(AtomicBool::new(true));
         let keep_reading = Arc::clone(&reader_thread_keep_reading);
@@ -254,10 +265,10 @@ impl FileStreamer {
 
                             if let Some(ref mut queue_block) = queue_block {
                                 file.file.fill_channels(
-                                    &file.sources,
+                                    &file.channels,
                                     blocksize,
                                     offset,
-                                    queue_block.sources(),
+                                    queue_block.channels(),
                                     )?;
                             }
                         }
@@ -290,7 +301,7 @@ impl FileStreamer {
                         file.start - current_frame
                     };
 
-                    file.file.fill_channels(&file.sources, blocksize, offset, block.sources())?;
+                    file.file.fill_channels(&file.channels, blocksize, offset, block.channels())?;
                 }
                 current_frame += blocksize;
 
@@ -310,20 +321,36 @@ impl FileStreamer {
             data_consumer: None,
             reader_thread: Some(reader_thread),
             reader_thread_keep_reading,
+            channels,
+            seek_frame: 0,
         }
     }
 
-    // TODO: return slice for each source?
-    // TODO: possibly empty slice?
-    fn get_data(&self) -> Option<f32> {
-        // TODO: check if data queue is available
-
-        // TODO: check if enough data is available
-
-        // TODO: copy from queue or provide slice(s) into queue?
-
-        None
+    /// Return value of 0 means un-recoverable error
+    pub unsafe fn get_data(&mut self, target: &[*mut f32]) -> usize {
+        // TODO: factor into separate function?
+        if self.data_consumer.is_none() {
+            if let Ok((seek_frame, queue)) = self.ready_consumer.pop() {
+                if seek_frame == self.seek_frame {
+                    self.data_consumer = Some(queue);
+                } else {
+                    // TODO: error handling (what if somebody send 1000 seek requests?)
+                    self.seek_producer.push((self.seek_frame, Some(queue))).unwrap();
+                }
+            }
+        }
+        if let Some(ref mut queue) = self.data_consumer {
+            queue.write_channel_ptrs(target)
+        } else {
+            0
+        }
     }
+
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    // TODO: seek(), check ready_queue
 }
 
 impl Drop for FileStreamer {

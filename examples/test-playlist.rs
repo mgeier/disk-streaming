@@ -1,4 +1,6 @@
 use std::fs;
+use std::thread;
+use std::time::Duration;
 
 use failure::Error;
 
@@ -19,12 +21,23 @@ fn main() -> Result<(), Error> {
         start: 0,
         end: Some(file.frames()),
         file,
-        sources: Box::new([Some(0), Some(1)]),
+        channels: Box::new([Some(0), Some(1)]),
     });
 
-    let streamer = FileStreamer::new(playlist, 1024);
+    let blocksize = 1024;
+    let channels = 4;
 
-    // TODO: get some data
+    let mut streamer = FileStreamer::new(playlist, blocksize, channels);
+
+    let mut data: Vec<Vec<_>> = (0..streamer.channels()).map(|_| vec![0f32; blocksize]).collect();
+
+    let pointers: Vec<*mut f32> = data.iter_mut().map(|v| v.as_mut_ptr()).collect();
+
+    thread::sleep(Duration::from_secs(2));
+
+    let result = unsafe { streamer.get_data(&pointers) };
+
+    println!("got {} frames of data", result);
 
     Ok(())
 }
