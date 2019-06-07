@@ -138,7 +138,10 @@ impl DataProducer {
                 *value = 0.0f32;
             }
         }
-        Some(WriteBlock { block: Some(block), queue: &mut self.data_producer })
+        Some(WriteBlock {
+            block: Some(block),
+            queue: &mut self.data_producer,
+        })
     }
 }
 
@@ -258,12 +261,8 @@ impl FileStreamer {
                         file.file.seek(0)?;
                         file.start - current_frame
                     };
-                    file.file.fill_channels(
-                        &file.channels,
-                        blocksize,
-                        offset,
-                        block.channels(),
-                        )?;
+                    file.file
+                        .fill_channels(&file.channels, blocksize, offset, block.channels())?;
                 }
                 current_frame += blocksize;
 
@@ -334,6 +333,3 @@ impl Drop for FileStreamer {
         self.reader_thread.take().unwrap().join();
     }
 }
-
-// TODO: FFI, return pointer to data? return NULL?
-// TODO: use catch_unwind()? https://doc.rust-lang.org/std/panic/fn.catch_unwind.html

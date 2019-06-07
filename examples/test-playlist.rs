@@ -29,7 +29,9 @@ fn main() -> Result<(), Error> {
 
     let mut streamer = FileStreamer::new(playlist, blocksize, channels);
 
-    let mut data: Vec<Vec<_>> = (0..streamer.channels()).map(|_| vec![0f32; blocksize]).collect();
+    let mut data: Vec<Vec<_>> = (0..streamer.channels())
+        .map(|_| vec![0f32; blocksize])
+        .collect();
 
     let pointers: Vec<*mut f32> = data.iter_mut().map(|v| v.as_mut_ptr()).collect();
 
@@ -37,7 +39,7 @@ fn main() -> Result<(), Error> {
         print!("seek attempt {} ... ", i);
         if streamer.seek(100) {
             println!("success");
-            break
+            break;
         }
         println!("failed");
         thread::sleep(Duration::from_millis(1));

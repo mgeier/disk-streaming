@@ -13,3 +13,6 @@ libsamplerate-sys = "*"
 ogg-sys = "*"
 vorbis-sys = "*"
 vorbisfile-sys = "*"
+
+[lib]
+crate-type = ["cdylib"]
