@@ -53,3 +53,14 @@ pub extern "C" fn file_streamer_seek(ptr: *mut FileStreamer, frame: libc::size_t
     let streamer = unsafe { &mut *ptr };
     streamer.seek(frame)
 }
+
+/// Return value of 0 means un-recoverable error
+#[no_mangle]
+pub unsafe extern "C" fn file_streamer_get_data(
+    ptr: *mut FileStreamer,
+    data: *const *mut f32,
+) -> libc::size_t {
+    assert!(!ptr.is_null());
+    let streamer = &mut *ptr;
+    streamer.get_data(std::slice::from_raw_parts(data, streamer.channels()))
+}

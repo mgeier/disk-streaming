@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 
 #include <jack/jack.h>
 
@@ -11,6 +12,7 @@ typedef struct {
   jack_port_t* port2;
   jack_port_t* port3;
   jack_port_t* port4;
+  float** block_data;
 } userdata_t;
 
 int sync_callback(jack_transport_state_t state, jack_position_t* pos, void* arg)
@@ -28,7 +30,12 @@ int process_callback(jack_nframes_t nframes, void *arg)
 
   if (state == JackTransportRolling)
   {
-    // TODO: get data from FileStreamer, write to ports
+    auto* data = userdata->block_data;
+    data[0] = static_cast<float*>(jack_port_get_buffer(userdata->port1, nframes));
+    data[1] = static_cast<float*>(jack_port_get_buffer(userdata->port2, nframes));
+    data[2] = static_cast<float*>(jack_port_get_buffer(userdata->port3, nframes));
+    data[3] = static_cast<float*>(jack_port_get_buffer(userdata->port4, nframes));
+    file_streamer_get_data(userdata->streamer, data);
   }
   // TODO: write zeros if no data is available?
   return 0;
@@ -52,6 +59,9 @@ int main()
   userdata.streamer = file_streamer_new(blocksize, samplerate);
 
   // For now, 4 channels/sources are hard-coded
+
+  std::vector<float*> storage(4);
+  userdata.block_data = storage.data();
 
   userdata.port1 = jack_port_register(
       userdata.client, "port_1", JACK_DEFAULT_AUDIO_TYPE,
