@@ -215,12 +215,7 @@ impl FileStreamer {
         let capacity = 100;
 
         let (ready_producer, ready_consumer) = queue::spsc::new(1);
-
-        let (seek_producer, seek_consumer): (
-            _,
-            queue::spsc::Consumer<(usize, DataConsumer)>,
-        ) = queue::spsc::new(1);
-
+        let (seek_producer, seek_consumer) = queue::spsc::new::<(usize, DataConsumer)>(1);
         let (mut data_producer, data_consumer) = make_data_queue(capacity, blocksize, channels);
 
         let reader_thread_keep_reading = Arc::new(AtomicBool::new(true));
