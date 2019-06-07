@@ -235,7 +235,6 @@ impl FileStreamer {
                     data_consumer = Some(queue);
                     current_frame = frame;
                     seek_frame = frame;
-                    println!("received seek {}", seek_frame);
                 }
                 let mut block = match data_producer.write_block() {
                     Some(block) => block,
@@ -245,7 +244,6 @@ impl FileStreamer {
                         continue;
                     }
                 };
-                println!("preparing to write block");
                 let active_files = ActiveIter {
                     block_start: current_frame,
                     block_end: current_frame + blocksize,
@@ -294,10 +292,8 @@ impl FileStreamer {
         // TODO: check if disk thread is still running?
 
         if let Some(ref mut queue) = self.data_consumer {
-            println!("getting data");
             queue.write_channel_ptrs(target)
         } else {
-            println!("no data_consumer");
             0
         }
     }

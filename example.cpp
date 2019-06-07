@@ -1,11 +1,118 @@
+#include <iostream>
+
+#include <jack/jack.h>
+
 #include "disk_streaming.h"
+
+typedef struct {
+  FileStreamer* streamer;
+  jack_client_t* client;
+  jack_port_t* port1;
+  jack_port_t* port2;
+  jack_port_t* port3;
+  jack_port_t* port4;
+} userdata_t;
+
+int sync_callback(jack_transport_state_t state, jack_position_t* pos, void* arg)
+{
+  auto* userdata = static_cast<userdata_t*>(arg);
+  return file_streamer_seek(userdata->streamer, pos->frame);
+}
+
+int process_callback(jack_nframes_t nframes, void *arg)
+{
+  auto* userdata = static_cast<userdata_t*>(arg);
+
+  jack_position_t pos;
+  jack_transport_state_t state = jack_transport_query(userdata->client, &pos);
+
+  if (state == JackTransportRolling)
+  {
+    // TODO: get data from FileStreamer, write to ports
+  }
+  // TODO: write zeros if no data is available?
+  return 0;
+}
 
 int main()
 {
-  FileStreamer* streamer = file_streamer_new(1024, 44100);
+  userdata_t userdata;
 
-  file_streamer_seek(streamer, 200);
+  jack_options_t options = JackNoStartServer;
+  userdata.client = jack_client_open("file-streamer", options, nullptr);
+  if (userdata.client == nullptr)
+  {
+    std::cout << "Cannot create JACK client" << std::endl;
+    exit(1);
+  }
 
-  file_streamer_free(streamer);
-  streamer = NULL;
+  auto blocksize = jack_get_buffer_size(userdata.client);
+  auto samplerate = jack_get_sample_rate(userdata.client);
+
+  userdata.streamer = file_streamer_new(blocksize, samplerate);
+
+  // For now, 4 channels/sources are hard-coded
+
+  userdata.port1 = jack_port_register(
+      userdata.client, "port_1", JACK_DEFAULT_AUDIO_TYPE,
+      JackPortIsOutput | JackPortIsTerminal, 0);
+  if (userdata.port1 == nullptr)
+  {
+    std::cout << "Cannot create JACK port" << std::endl;
+    exit(1);
+  }
+
+  userdata.port2 = jack_port_register(
+      userdata.client, "port_2", JACK_DEFAULT_AUDIO_TYPE,
+      JackPortIsOutput | JackPortIsTerminal, 0);
+  if (userdata.port2 == nullptr)
+  {
+    std::cout << "Cannot create JACK port" << std::endl;
+    exit(1);
+  }
+
+  userdata.port3 = jack_port_register(
+      userdata.client, "port_3", JACK_DEFAULT_AUDIO_TYPE,
+      JackPortIsOutput | JackPortIsTerminal, 0);
+  if (userdata.port3 == nullptr)
+  {
+    std::cout << "Cannot create JACK port" << std::endl;
+    exit(1);
+  }
+
+  userdata.port4 = jack_port_register(
+      userdata.client, "port_4", JACK_DEFAULT_AUDIO_TYPE,
+      JackPortIsOutput | JackPortIsTerminal, 0);
+  if (userdata.port4 == nullptr)
+  {
+    std::cout << "Cannot create JACK port" << std::endl;
+    exit(1);
+  }
+
+  if (jack_set_sync_callback(userdata.client, sync_callback, &userdata) != 0)
+  {
+    std::cout << "Cannot set sync callback" << std::endl;
+    exit(1);
+  }
+
+  if (jack_set_process_callback(userdata.client, process_callback, &userdata) != 0)
+  {
+    std::cout << "Cannot set process callback" << std::endl;
+    exit(1);
+  }
+
+  if (jack_activate(userdata.client) != 0)
+  {
+    std::cout << "Cannot activate JACK client" << std::endl;
+    exit(1);
+  }
+
+  std::cout << "Press <Enter> to stop" << std::endl;
+  std::cin.get();
+
+  jack_deactivate(userdata.client);
+  jack_client_close(userdata.client);
+
+  file_streamer_free(userdata.streamer);
+  userdata.streamer = NULL;
 }
