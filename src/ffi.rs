@@ -14,15 +14,25 @@ use crate::streamer::{load_audio_file, FileStreamer, PlaylistEntry};
 fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreamer, Error> {
     let channels = 4;
     let mut playlist = Vec::new();
+
     let file = fs::File::open("marimba.ogg")?;
     let file = load_audio_file(file, samplerate)?;
-
     playlist.push(PlaylistEntry {
         start: 0,
         end: Some(file.frames()),
         file,
         channels: Box::new([Some(0), Some(1)]),
     });
+
+    let file = fs::File::open("marimba.ogg")?;
+    let file = load_audio_file(file, samplerate)?;
+    playlist.push(PlaylistEntry {
+        start: 0 + 3 * 44_100,
+        end: Some(file.frames() + 3 * 44_100),
+        file,
+        channels: Box::new([Some(2), Some(3)]),
+    });
+
     Ok(FileStreamer::new(playlist, blocksize, channels))
 }
 

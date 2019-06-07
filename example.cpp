@@ -35,7 +35,12 @@ int process_callback(jack_nframes_t nframes, void *arg)
     data[1] = static_cast<float*>(jack_port_get_buffer(userdata->port2, nframes));
     data[2] = static_cast<float*>(jack_port_get_buffer(userdata->port3, nframes));
     data[3] = static_cast<float*>(jack_port_get_buffer(userdata->port4, nframes));
-    file_streamer_get_data(userdata->streamer, data);
+    if (file_streamer_get_data(userdata->streamer, data) == 0)
+    {
+      // TODO: write zeros?
+      std::cerr << "empty queue, stopping callback" << std::endl;
+      return 1;
+    }
   }
   // TODO: write zeros if no data is available?
   return 0;
