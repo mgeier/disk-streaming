@@ -4,6 +4,7 @@ use std::sync::{
     Arc,
 };
 use std::thread;
+use std::time::Duration;
 
 use crossbeam::queue;
 use failure::Error;
@@ -165,12 +166,11 @@ impl DataConsumer {
 
 pub struct FileStreamer {
     ready_consumer: queue::spsc::Consumer<(usize, DataConsumer)>,
-    seek_producer: queue::spsc::Producer<(usize, Option<DataConsumer>)>,
+    seek_producer: queue::spsc::Producer<(usize, DataConsumer)>,
     data_consumer: Option<DataConsumer>,
     reader_thread: Option<thread::JoinHandle<Result<(), Error>>>,
     reader_thread_keep_reading: Arc<AtomicBool>,
     channels: usize,
-    seek_frame: usize,
 }
 
 // TODO: make less public
@@ -218,7 +218,7 @@ impl FileStreamer {
 
         let (seek_producer, seek_consumer): (
             _,
-            queue::spsc::Consumer<(usize, Option<DataConsumer>)>,
+            queue::spsc::Consumer<(usize, DataConsumer)>,
         ) = queue::spsc::new(1);
 
         let (mut data_producer, data_consumer) = make_data_queue(capacity, blocksize, channels);
@@ -227,67 +227,27 @@ impl FileStreamer {
         let keep_reading = Arc::clone(&reader_thread_keep_reading);
 
         let reader_thread = thread::spawn(move || -> Result<(), Error> {
-            let mut queue = Some(data_consumer);
-            let mut seek_frame = 0;
+            let mut data_consumer = Some(data_consumer);
             let mut current_frame = 0;
+            let mut seek_frame = 0;
 
             while keep_reading.load(Ordering::Acquire) {
-                if let Ok((frame, data_consumer)) = seek_consumer.pop() {
-                    //if frame != seek_frame || frame != current_frame {
-                    if frame != seek_frame || data_consumer.is_some() {
-                        queue = queue.or(data_consumer);
-
-                        current_frame = frame;
-                        seek_frame = frame;
-
-                        let mut queue_block = match queue.as_mut() {
-                            Some(queue) => {
-                                queue.clear();
-                                data_producer.write_block()
-                            }
-                            _ => None,
-                        };
-
-                        let active_files = ActiveIter {
-                            block_start: current_frame,
-                            block_end: current_frame + blocksize,
-                            inner: playlist.iter_mut(),
-                        };
-
-                        for ref mut file in active_files {
-                            let offset = if file.start < seek_frame {
-                                file.file.seek(seek_frame - file.start)?;
-                                0
-                            } else {
-                                file.file.seek(0)?;
-                                file.start - seek_frame
-                            };
-
-                            if let Some(ref mut queue_block) = queue_block {
-                                file.file.fill_channels(
-                                    &file.channels,
-                                    blocksize,
-                                    offset,
-                                    queue_block.channels(),
-                                    )?;
-                            }
-                        }
-                        if queue_block.is_some() {
-                            current_frame += blocksize;
-                        }
-                    }
-                }
-                if current_frame <= seek_frame && queue.is_none() {
-                    // NB: Audio thread has outdated queue, we have to wait for next "seek" message
-                    continue;
+                if let Ok((frame, mut queue)) = seek_consumer.pop() {
+                    queue.clear();
+                    data_consumer = Some(queue);
+                    current_frame = frame;
+                    seek_frame = frame;
+                    println!("received seek {}", seek_frame);
                 }
                 let mut block = match data_producer.write_block() {
                     Some(block) => block,
                     None => {
-                        thread::yield_now();
+                        // TODO: configurable sleep time?
+                        thread::sleep(Duration::from_micros(1_000));
                         continue;
                     }
                 };
+                println!("preparing to write block");
                 let active_files = ActiveIter {
                     block_start: current_frame,
                     block_end: current_frame + blocksize,
@@ -295,21 +255,31 @@ impl FileStreamer {
                 };
                 for ref mut file in active_files {
                     let offset = if file.start < current_frame {
+                        if current_frame == seek_frame {
+                            file.file.seek(current_frame - file.start)?;
+                        }
                         0
                     } else {
                         file.file.seek(0)?;
                         file.start - current_frame
                     };
-
-                    file.file.fill_channels(&file.channels, blocksize, offset, block.channels())?;
+                    file.file.fill_channels(
+                        &file.channels,
+                        blocksize,
+                        offset,
+                        block.channels(),
+                        )?;
                 }
                 current_frame += blocksize;
 
+                // Make sure the block is queued before data_consumer is sent
+                drop(block);
+
                 // TODO: get this information from the queue itself?
                 if current_frame - seek_frame >= min_frames {
-                    if let Some(queue) = queue.take() {
+                    if let Some(data_consumer) = data_consumer.take() {
                         // There is only one data queue, push() will always succeed
-                        ready_producer.push((seek_frame, queue)).unwrap();
+                        ready_producer.push((seek_frame, data_consumer)).unwrap();
                     }
                 }
             }
@@ -322,26 +292,18 @@ impl FileStreamer {
             reader_thread: Some(reader_thread),
             reader_thread_keep_reading,
             channels,
-            seek_frame: 0,
         }
     }
 
     /// Return value of 0 means un-recoverable error
     pub unsafe fn get_data(&mut self, target: &[*mut f32]) -> usize {
-        // TODO: factor into separate function?
-        if self.data_consumer.is_none() {
-            if let Ok((seek_frame, queue)) = self.ready_consumer.pop() {
-                if seek_frame == self.seek_frame {
-                    self.data_consumer = Some(queue);
-                } else {
-                    // TODO: error handling (what if somebody send 1000 seek requests?)
-                    self.seek_producer.push((self.seek_frame, Some(queue))).unwrap();
-                }
-            }
-        }
+        // TODO: check if disk thread is still running?
+
         if let Some(ref mut queue) = self.data_consumer {
+            println!("getting data");
             queue.write_channel_ptrs(target)
         } else {
+            println!("no data_consumer");
             0
         }
     }
@@ -350,7 +312,23 @@ impl FileStreamer {
         self.channels
     }
 
-    // TODO: seek(), check ready_queue
+    pub fn seek(&mut self, frame: usize) -> bool {
+        // TODO: check if disk thread is still running?
+
+        if self.data_consumer.is_none() {
+            // NB: There can never be more than one message
+            if let Ok((ready_frame, queue)) = self.ready_consumer.pop() {
+                self.data_consumer = Some(queue);
+                if ready_frame == frame {
+                    return true;
+                }
+            }
+        }
+        if let Some(queue) = self.data_consumer.take() {
+            self.seek_producer.push((frame, queue)).unwrap();
+        }
+        false
+    }
 }
 
 impl Drop for FileStreamer {

@@ -33,7 +33,15 @@ fn main() -> Result<(), Error> {
 
     let pointers: Vec<*mut f32> = data.iter_mut().map(|v| v.as_mut_ptr()).collect();
 
-    thread::sleep(Duration::from_secs(2));
+    for i in 1.. {
+        print!("seek attempt {} ... ", i);
+        if streamer.seek(100) {
+            println!("success");
+            break
+        }
+        println!("failed");
+        thread::sleep(Duration::from_millis(1));
+    }
 
     let result = unsafe { streamer.get_data(&pointers) };
 
