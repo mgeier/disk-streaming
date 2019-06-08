@@ -1,0 +1,11 @@
+[package]
+name = "disk-streaming-ffi"
+version = "0.0.0"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+failure = "*"
+libc = "*"
+disk-streaming = { path = ".." }

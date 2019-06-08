@@ -15,7 +15,7 @@ Requirements
 Compilation
 -----------
 
-* `cargo build`
+* `cargo build --all`
 * `make`
 
 Running

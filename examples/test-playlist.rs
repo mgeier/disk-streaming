@@ -45,9 +45,11 @@ fn main() -> Result<(), Error> {
         thread::sleep(Duration::from_millis(1));
     }
 
-    let result = unsafe { streamer.get_data(&pointers) };
+    let result = unsafe { streamer.get_data(&pointers, true) };
 
-    println!("got {} frames of data", result);
+    if result {
+        println!("got data");
+    }
 
     Ok(())
 }

@@ -3,9 +3,11 @@
 
 use std::fs;
 
+extern crate failure;
 use failure::Error;
 
-use crate::streamer::{load_audio_file, FileStreamer, PlaylistEntry};
+extern crate disk_streaming;
+use disk_streaming::streamer::{load_audio_file, FileStreamer, PlaylistEntry};
 
 // TODO: use catch_unwind()? https://doc.rust-lang.org/std/panic/fn.catch_unwind.html
 
@@ -80,8 +82,6 @@ pub unsafe extern "C" fn file_streamer_get_data(
 ) -> bool {
     assert!(!ptr.is_null());
     let streamer = &mut *ptr;
-    streamer.get_data(
-        std::slice::from_raw_parts(data, streamer.channels()),
-        rolling,
-    )
+    let data = std::slice::from_raw_parts(data, streamer.channels());
+    streamer.get_data(data, rolling)
 }
