@@ -40,7 +40,6 @@ int process_callback(jack_nframes_t nframes, void *arg)
     return 1;
   }
   return 0;
-
 }
 
 int main()

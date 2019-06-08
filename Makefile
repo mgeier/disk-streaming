@@ -1,4 +1,4 @@
-#LDFLAGS = -ldisk_streaming -Ltarget/release
+#LDFLAGS = -ldisk_streaming -Ltarget/release -ljack
 LDFLAGS = -ldisk_streaming -Ltarget/debug -ljack
 CXXFLAGS = -std=c++17 -g
 
