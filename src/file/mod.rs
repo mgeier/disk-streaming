@@ -61,6 +61,7 @@ pub trait AudioFileBlocks {
                 break;
             }
             let iterators = file_block.channel_iterators();
+            // TODO: check channel_map for validity?
             for (i, &channel) in channel_map.iter().enumerate() {
                 if let Some(channel) = channel {
                     // TODO: use iterators[i]?

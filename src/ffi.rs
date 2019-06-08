@@ -33,6 +33,15 @@ fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreame
         channels: Box::new([Some(2), Some(3)]),
     });
 
+    let file = fs::File::open("ukewave.ogg")?;
+    let file = load_audio_file(file, samplerate)?;
+    playlist.push(PlaylistEntry {
+        start: 0 + 4 * 44_100,
+        end: Some(file.frames() + 4 * 44_100),
+        file,
+        channels: Box::new([Some(1)]),
+    });
+
     Ok(FileStreamer::new(playlist, blocksize, channels))
 }
 
