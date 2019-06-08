@@ -27,7 +27,7 @@ fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreame
     let file = fs::File::open("marimba.ogg")?;
     let file = load_audio_file(file, samplerate)?;
     playlist.push(PlaylistEntry {
-        start: 0 + 3 * 44_100,
+        start: 3 * 44_100,
         end: Some(file.frames() + 3 * 44_100),
         file,
         channels: Box::new([Some(2), Some(3)]),
@@ -36,7 +36,7 @@ fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreame
     let file = fs::File::open("ukewave.ogg")?;
     let file = load_audio_file(file, samplerate)?;
     playlist.push(PlaylistEntry {
-        start: 0 + 4 * 44_100,
+        start: 4 * 44_100,
         end: Some(file.frames() + 4 * 44_100),
         file,
         channels: Box::new([Some(1)]),
@@ -58,18 +58,16 @@ pub extern "C" fn file_streamer_new(
 }
 
 #[no_mangle]
-pub extern "C" fn file_streamer_free(ptr: *mut FileStreamer) {
+pub unsafe extern "C" fn file_streamer_free(ptr: *mut FileStreamer) {
     if !ptr.is_null() {
-        unsafe {
-            Box::from_raw(ptr);
-        }
+        Box::from_raw(ptr);
     }
 }
 
 #[no_mangle]
-pub extern "C" fn file_streamer_seek(ptr: *mut FileStreamer, frame: libc::size_t) -> bool {
+pub unsafe extern "C" fn file_streamer_seek(ptr: *mut FileStreamer, frame: libc::size_t) -> bool {
     assert!(!ptr.is_null());
-    let streamer = unsafe { &mut *ptr };
+    let streamer = &mut *ptr;
     streamer.seek(frame)
 }
 

@@ -270,13 +270,13 @@ impl FileStreamer {
                         continue;
                     }
                 };
-                let active_files = ActiveIter {
+                let mut active_files = ActiveIter {
                     block_start: current_frame,
                     block_end: current_frame + blocksize,
                     inner: playlist.iter_mut(),
                 };
                 // TODO: Is linear search too slow? How long can playlists be?
-                for ref mut file in active_files {
+                for file in &mut active_files {
                     let offset = if file.start < current_frame {
                         if current_frame == seek_frame {
                             file.file.seek(current_frame - file.start)?;
