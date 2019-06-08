@@ -57,6 +57,9 @@ pub trait AudioFileBlocks {
         let mut offset = offset;
         while offset < blocksize {
             let file_block = self.next_block(blocksize - offset)?;
+            if file_block.is_empty() {
+                break;
+            }
             let iterators = file_block.channel_iterators();
             for (i, &channel) in channel_map.iter().enumerate() {
                 if let Some(channel) = channel {
@@ -70,6 +73,7 @@ pub trait AudioFileBlocks {
             }
             offset += file_block.frames();
         }
+        // TODO: return number of frames?
         Ok(())
     }
 }
@@ -78,4 +82,7 @@ pub trait Block {
     type Channel: Iterator<Item = f32>;
     fn channel_iterators(&mut self) -> &mut [Self::Channel];
     fn frames(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.frames() == 0
+    }
 }
