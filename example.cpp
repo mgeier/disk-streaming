@@ -21,6 +21,14 @@ int sync_callback(jack_transport_state_t state, jack_position_t* pos, void* arg)
   return file_streamer_seek(userdata->streamer, pos->frame);
 }
 
+void fill_with_zeros(float** data, jack_nframes_t nframes)
+{
+  std::fill(data[0], data[0] + nframes, 0.0f);
+  std::fill(data[1], data[1] + nframes, 0.0f);
+  std::fill(data[2], data[2] + nframes, 0.0f);
+  std::fill(data[3], data[3] + nframes, 0.0f);
+}
+
 int process_callback(jack_nframes_t nframes, void *arg)
 {
   auto* userdata = static_cast<userdata_t*>(arg);
@@ -28,21 +36,25 @@ int process_callback(jack_nframes_t nframes, void *arg)
   jack_position_t pos;
   jack_transport_state_t state = jack_transport_query(userdata->client, &pos);
 
+  auto* data = userdata->block_data;
+  data[0] = static_cast<float*>(jack_port_get_buffer(userdata->port1, nframes));
+  data[1] = static_cast<float*>(jack_port_get_buffer(userdata->port2, nframes));
+  data[2] = static_cast<float*>(jack_port_get_buffer(userdata->port3, nframes));
+  data[3] = static_cast<float*>(jack_port_get_buffer(userdata->port4, nframes));
+
   if (state == JackTransportRolling)
   {
-    auto* data = userdata->block_data;
-    data[0] = static_cast<float*>(jack_port_get_buffer(userdata->port1, nframes));
-    data[1] = static_cast<float*>(jack_port_get_buffer(userdata->port2, nframes));
-    data[2] = static_cast<float*>(jack_port_get_buffer(userdata->port3, nframes));
-    data[3] = static_cast<float*>(jack_port_get_buffer(userdata->port4, nframes));
     if (file_streamer_get_data(userdata->streamer, data) == 0)
     {
-      // TODO: write zeros?
+      fill_with_zeros(data, nframes);
       std::cerr << "empty queue, stopping callback" << std::endl;
       return 1;
     }
   }
-  // TODO: write zeros if no data is available?
+  else
+  {
+    fill_with_zeros(data, nframes);
+  }
   return 0;
 }
 
