@@ -13,27 +13,12 @@ typedef struct {
   jack_port_t* port3 = nullptr;
   jack_port_t* port4 = nullptr;
   float** block_data = nullptr;
-  jack_transport_state_t previous_state = JackTransportStopped;
-  size_t seek_frame = 0;
 } userdata_t;
 
 int sync_callback(jack_transport_state_t state, jack_position_t* pos, void* arg)
 {
   auto* userdata = static_cast<userdata_t*>(arg);
-  if (state == JackTransportStarting && userdata->previous_state == JackTransportRolling)
-  {
-    userdata->seek_frame = pos->frame;
-    return 0;  // Not ready to roll
-  }
   return file_streamer_seek(userdata->streamer, pos->frame);
-}
-
-void fill_with_zeros(float** data, jack_nframes_t nframes)
-{
-  std::fill(data[0], data[0] + nframes, 0.0f);
-  std::fill(data[1], data[1] + nframes, 0.0f);
-  std::fill(data[2], data[2] + nframes, 0.0f);
-  std::fill(data[3], data[3] + nframes, 0.0f);
 }
 
 int process_callback(jack_nframes_t nframes, void *arg)
@@ -49,36 +34,13 @@ int process_callback(jack_nframes_t nframes, void *arg)
   data[2] = static_cast<float*>(jack_port_get_buffer(userdata->port3, nframes));
   data[3] = static_cast<float*>(jack_port_get_buffer(userdata->port4, nframes));
 
-  if (state == JackTransportRolling)
+  if (!file_streamer_get_data(userdata->streamer, data, state == JackTransportRolling))
   {
-    if (file_streamer_get_data(userdata->streamer, data) == 0)
-    {
-      goto empty_queue;
-    }
+    std::cerr << "empty queue, stopping callback" << std::endl;
+    return 1;
   }
-  else
-  {
-    if (userdata->previous_state == JackTransportRolling)
-    {
-      if (file_streamer_get_data_with_fade_out(userdata->streamer, data) == 0)
-      {
-        goto empty_queue;
-      }
-      // Ignore return value; will be checked again at next sync callback
-      file_streamer_seek(userdata->streamer, userdata->seek_frame);
-    }
-    else
-    {
-      fill_with_zeros(data, nframes);
-    }
-  }
-  userdata->previous_state = state;
   return 0;
 
-empty_queue:
-  fill_with_zeros(data, nframes);
-  std::cerr << "empty queue, stopping callback" << std::endl;
-  return 1;
 }
 
 int main()
@@ -151,6 +113,8 @@ int main()
     exit(1);
   }
 
+  // TODO: stop transport? (jumping onto running transport is not supported)
+
   if (jack_activate(userdata.client) != 0)
   {
     std::cout << "Cannot activate JACK client" << std::endl;
@@ -159,6 +123,8 @@ int main()
 
   std::cout << "Press <Enter> to stop" << std::endl;
   std::cin.get();
+
+  // TODO: stop transport? (to avoid click at the end)
 
   jack_deactivate(userdata.client);
   jack_client_close(userdata.client);

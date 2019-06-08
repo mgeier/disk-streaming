@@ -11,6 +11,12 @@ use failure::Error;
 
 use crate::file::{converter, vorbis, AudioFileBasics, AudioFileBlocks};
 
+enum Fade {
+    In,
+    Out,
+    None,
+}
+
 /// Can be used with dynamic dispatch
 pub trait AudioFile: AudioFileBasics {
     fn fill_channels(
@@ -152,24 +158,34 @@ impl DataConsumer {
         }
     }
 
-    /// Return value of 0 means un-recoverable error
-    unsafe fn write_channel_ptrs(&mut self, channels: &[*mut f32], fade_out: bool) -> usize {
+    /// Return value of `false` means un-recoverable error (but output buffer is still filled)
+    #[must_use]
+    unsafe fn write_channel_ptrs(&mut self, target: &[*mut f32], fade: Fade) -> bool {
         if let Ok(block) = self.data_consumer.pop() {
-            for (source, &target) in block.channels.iter().zip(channels) {
-                if fade_out {
-                    for i in 0..self.blocksize {
-                        // TODO: more interesting fade than linear?
-                        *target.add(i) = source[i] * (self.blocksize - i) as f32 / self.blocksize as f32;
+            for (source, &target) in block.channels.iter().zip(target) {
+                match fade {
+                    Fade::In => {
+                        for i in 0..self.blocksize {
+                            *target.add(i) = source[i] * (i + 1) as f32 / self.blocksize as f32;
+                        }
                     }
-                } else {
-                    let target = std::slice::from_raw_parts_mut(target, self.blocksize);
-                    target.copy_from_slice(source);
+                    Fade::Out => {
+                        for i in 0..self.blocksize {
+                            *target.add(i) =
+                                source[i] * (self.blocksize - i) as f32 / self.blocksize as f32;
+                        }
+                    }
+                    Fade::None => {
+                        let target = std::slice::from_raw_parts_mut(target, self.blocksize);
+                        target.copy_from_slice(source);
+                    }
                 }
             }
             self.recycling_producer.push(block).unwrap();
-            self.blocksize
+            true
         } else {
-            0
+            fill_with_zeros(target, self.blocksize);
+            false
         }
     }
 }
@@ -181,6 +197,9 @@ pub struct FileStreamer {
     reader_thread: Option<thread::JoinHandle<Result<(), Error>>>,
     reader_thread_keep_reading: Arc<AtomicBool>,
     channels: usize,
+    blocksize: usize,
+    previously_rolling: bool,
+    seek_frame: Option<usize>,
 }
 
 // TODO: make less public
@@ -292,38 +311,59 @@ impl FileStreamer {
             reader_thread: Some(reader_thread),
             reader_thread_keep_reading,
             channels,
+            blocksize,
+            previously_rolling: false,
+            seek_frame: None,
         }
-    }
-
-    unsafe fn get_data_helper(&mut self, target: &[*mut f32], fade_out: bool) -> usize {
-        // TODO: check if disk thread is still running?
-
-        if let Some(ref mut queue) = self.data_consumer {
-            queue.write_channel_ptrs(target, fade_out)
-        } else {
-            0
-        }
-    }
-
-    /// Return value of 0 means un-recoverable error
-    pub unsafe fn get_data(&mut self, target: &[*mut f32]) -> usize {
-        let fade_out = false;
-        self.get_data_helper(target, fade_out)
-    }
-
-    /// Return value of 0 means un-recoverable error
-    pub unsafe fn get_data_with_fade_out(&mut self, target: &[*mut f32]) -> usize {
-        let fade_out = true;
-        self.get_data_helper(target, fade_out)
     }
 
     pub fn channels(&self) -> usize {
         self.channels
     }
 
-    pub fn seek(&mut self, frame: usize) -> bool {
-        // TODO: check if disk thread is still running?
+    /// Return value of `false` means un-recoverable error
+    #[must_use]
+    pub unsafe fn get_data(&mut self, target: &[*mut f32], rolling: bool) -> bool {
+        // TODO: Check if disk thread is still running? return false if not?
 
+        let previously = self.previously_rolling;
+        let result = if !rolling && !previously {
+            fill_with_zeros(target, self.blocksize);
+            true
+        } else if let Some(ref mut queue) = self.data_consumer {
+            let fade = if rolling && !previously {
+                Fade::In
+            } else if !rolling && previously {
+                Fade::Out
+            } else {
+                Fade::None
+            };
+            queue.write_channel_ptrs(target, fade)
+        } else {
+            fill_with_zeros(target, self.blocksize);
+            false
+        };
+        // NB: This has to be updated before seeking:
+        self.previously_rolling = rolling;
+        if let Some(frame) = self.seek_frame.take() {
+            if rolling {
+                // NB: Seeking while rolling is not supported
+                return false;
+            }
+            let _ = self.seek(frame);
+        }
+        result
+    }
+
+    #[must_use]
+    pub fn seek(&mut self, frame: usize) -> bool {
+        // TODO: Check if disk thread is still running? What if not?
+
+        if self.previously_rolling {
+            self.seek_frame = Some(frame);
+            // Don't seek yet; get_data() fades out and calls seek afterwards
+            return false;
+        }
         if self.data_consumer.is_none() {
             // NB: There can never be more than one message
             if let Ok((ready_frame, queue)) = self.ready_consumer.pop() {
@@ -345,6 +385,14 @@ impl Drop for FileStreamer {
         self.reader_thread_keep_reading
             .store(false, Ordering::Release);
         // TODO: handle error from closure? log errors?
-        self.reader_thread.take().unwrap().join();
+        self.reader_thread.take().unwrap().join().unwrap().unwrap();
+    }
+}
+
+unsafe fn fill_with_zeros(target: &[*mut f32], blocksize: usize) {
+    for ptr in target {
+        for f in 0..blocksize {
+            *ptr.add(f) = 0.0f32;
+        }
     }
 }
