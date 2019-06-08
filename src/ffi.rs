@@ -74,3 +74,14 @@ pub unsafe extern "C" fn file_streamer_get_data(
     let streamer = &mut *ptr;
     streamer.get_data(std::slice::from_raw_parts(data, streamer.channels()))
 }
+
+/// Return value of 0 means un-recoverable error
+#[no_mangle]
+pub unsafe extern "C" fn file_streamer_get_data_with_fade_out(
+    ptr: *mut FileStreamer,
+    data: *const *mut f32,
+) -> libc::size_t {
+    assert!(!ptr.is_null());
+    let streamer = &mut *ptr;
+    streamer.get_data_with_fade_out(std::slice::from_raw_parts(data, streamer.channels()))
+}

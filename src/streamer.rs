@@ -153,11 +153,18 @@ impl DataConsumer {
     }
 
     /// Return value of 0 means un-recoverable error
-    unsafe fn write_channel_ptrs(&mut self, channels: &[*mut f32]) -> usize {
+    unsafe fn write_channel_ptrs(&mut self, channels: &[*mut f32], fade_out: bool) -> usize {
         if let Ok(block) = self.data_consumer.pop() {
             for (source, &target) in block.channels.iter().zip(channels) {
-                let target = std::slice::from_raw_parts_mut(target, self.blocksize);
-                target.copy_from_slice(source);
+                if fade_out {
+                    for i in 0..self.blocksize {
+                        // TODO: more interesting fade than linear?
+                        *target.add(i) = source[i] * (self.blocksize - i) as f32 / self.blocksize as f32;
+                    }
+                } else {
+                    let target = std::slice::from_raw_parts_mut(target, self.blocksize);
+                    target.copy_from_slice(source);
+                }
             }
             self.recycling_producer.push(block).unwrap();
             self.blocksize
@@ -249,6 +256,7 @@ impl FileStreamer {
                     block_end: current_frame + blocksize,
                     inner: playlist.iter_mut(),
                 };
+                // TODO: Is linear search too slow? How long can playlists be?
                 for ref mut file in active_files {
                     let offset = if file.start < current_frame {
                         if current_frame == seek_frame {
@@ -287,15 +295,26 @@ impl FileStreamer {
         }
     }
 
-    /// Return value of 0 means un-recoverable error
-    pub unsafe fn get_data(&mut self, target: &[*mut f32]) -> usize {
+    unsafe fn get_data_helper(&mut self, target: &[*mut f32], fade_out: bool) -> usize {
         // TODO: check if disk thread is still running?
 
         if let Some(ref mut queue) = self.data_consumer {
-            queue.write_channel_ptrs(target)
+            queue.write_channel_ptrs(target, fade_out)
         } else {
             0
         }
+    }
+
+    /// Return value of 0 means un-recoverable error
+    pub unsafe fn get_data(&mut self, target: &[*mut f32]) -> usize {
+        let fade_out = false;
+        self.get_data_helper(target, fade_out)
+    }
+
+    /// Return value of 0 means un-recoverable error
+    pub unsafe fn get_data_with_fade_out(&mut self, target: &[*mut f32]) -> usize {
+        let fade_out = true;
+        self.get_data_helper(target, fade_out)
     }
 
     pub fn channels(&self) -> usize {

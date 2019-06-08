@@ -6,18 +6,25 @@
 #include "disk_streaming.h"
 
 typedef struct {
-  FileStreamer* streamer;
-  jack_client_t* client;
-  jack_port_t* port1;
-  jack_port_t* port2;
-  jack_port_t* port3;
-  jack_port_t* port4;
-  float** block_data;
+  FileStreamer* streamer = nullptr;
+  jack_client_t* client = nullptr;
+  jack_port_t* port1 = nullptr;
+  jack_port_t* port2 = nullptr;
+  jack_port_t* port3 = nullptr;
+  jack_port_t* port4 = nullptr;
+  float** block_data = nullptr;
+  jack_transport_state_t previous_state = JackTransportStopped;
+  size_t seek_frame = 0;
 } userdata_t;
 
 int sync_callback(jack_transport_state_t state, jack_position_t* pos, void* arg)
 {
   auto* userdata = static_cast<userdata_t*>(arg);
+  if (state == JackTransportStarting && userdata->previous_state == JackTransportRolling)
+  {
+    userdata->seek_frame = pos->frame;
+    return 0;  // Not ready to roll
+  }
   return file_streamer_seek(userdata->streamer, pos->frame);
 }
 
@@ -46,16 +53,32 @@ int process_callback(jack_nframes_t nframes, void *arg)
   {
     if (file_streamer_get_data(userdata->streamer, data) == 0)
     {
-      fill_with_zeros(data, nframes);
-      std::cerr << "empty queue, stopping callback" << std::endl;
-      return 1;
+      goto empty_queue;
     }
   }
   else
   {
-    fill_with_zeros(data, nframes);
+    if (userdata->previous_state == JackTransportRolling)
+    {
+      if (file_streamer_get_data_with_fade_out(userdata->streamer, data) == 0)
+      {
+        goto empty_queue;
+      }
+      // Ignore return value; will be checked again at next sync callback
+      file_streamer_seek(userdata->streamer, userdata->seek_frame);
+    }
+    else
+    {
+      fill_with_zeros(data, nframes);
+    }
   }
+  userdata->previous_state = state;
   return 0;
+
+empty_queue:
+  fill_with_zeros(data, nframes);
+  std::cerr << "empty queue, stopping callback" << std::endl;
+  return 1;
 }
 
 int main()
