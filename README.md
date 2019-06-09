@@ -15,7 +15,7 @@ Requirements
 Compilation
 -----------
 
-    cargo build --all
+    cargo build --all --release
 
 Example C++ progam:
 
@@ -27,7 +27,7 @@ Running
 
 * Start `jackd` (e.g. with the `qjackctl` tool)
 * `cd examples`
-* `export LD_LIBRARY_PATH=../target/debug`
+* `export LD_LIBRARY_PATH=../target/release`
 * `./example`
 * Connect JACK ports to output ports (e.g. with the `qjackctl` tool)
 * Play around with the JACK transport (e.g. with the `qjackctl` tool)
