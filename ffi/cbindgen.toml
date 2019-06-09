@@ -1,0 +1,11 @@
+include_guard = "DISK_STREAMING_H"
+include_version = true
+language = "C"
+#cpp_compat = true
+
+[parse]
+parse_deps = true
+include = ["disk-streaming"]
+
+[export.rename]
+"FileStreamer" = "FILE_STREAMER"

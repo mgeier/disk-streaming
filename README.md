@@ -15,14 +15,19 @@ Requirements
 Compilation
 -----------
 
-* `cargo build --all`
-* `make`
+    cargo build --all
+
+Example C++ progam:
+
+    cd examples
+    make
 
 Running
 -------
 
 * Start `jackd` (e.g. with the `qjackctl` tool)
-* `export LD_LIBRARY_PATH=target/debug`
+* `cd examples`
+* `export LD_LIBRARY_PATH=../target/debug`
 * `./example`
 * Connect JACK ports to output ports (e.g. with the `qjackctl` tool)
 * Play around with the JACK transport (e.g. with the `qjackctl` tool)
@@ -34,4 +39,4 @@ The file `disk_streaming.h` was generated with
 [cbindgen](https://crates.io/crates/cbindgen) (`cargo install cbindgen`).
 After changes in the API functions, it can be updated with
 
-* `cbindgen -o disk_streaming.h`
+* `cbindgen ffi -o ffi/disk_streaming.h`

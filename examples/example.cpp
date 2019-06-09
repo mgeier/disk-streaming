@@ -3,10 +3,14 @@
 
 #include <jack/jack.h>
 
+// TODO: remove "extern" after new cbindgen version is released, see
+//       https://github.com/eqrion/cbindgen/pull/349
+extern "C" {
 #include "disk_streaming.h"
+}
 
 typedef struct {
-  FileStreamer* streamer = nullptr;
+  FILE_STREAMER* streamer = nullptr;
   jack_client_t* client = nullptr;
   jack_port_t* port1 = nullptr;
   jack_port_t* port2 = nullptr;
@@ -50,7 +54,7 @@ int main()
   userdata.client = jack_client_open("file-streamer", options, nullptr);
   if (userdata.client == nullptr)
   {
-    std::cout << "Cannot create JACK client" << std::endl;
+    std::cerr << "Cannot create JACK client" << std::endl;
     exit(1);
   }
 
@@ -58,6 +62,11 @@ int main()
   auto samplerate = jack_get_sample_rate(userdata.client);
 
   userdata.streamer = file_streamer_new(blocksize, samplerate);
+  if (userdata.streamer == nullptr)
+  {
+    std::cerr << "Cannot load files" << std::endl;
+    exit(1);
+  }
 
   // For now, 4 channels/sources are hard-coded
 
@@ -69,7 +78,7 @@ int main()
       JackPortIsOutput | JackPortIsTerminal, 0);
   if (userdata.port1 == nullptr)
   {
-    std::cout << "Cannot create JACK port" << std::endl;
+    std::cerr << "Cannot create JACK port" << std::endl;
     exit(1);
   }
 
@@ -78,7 +87,7 @@ int main()
       JackPortIsOutput | JackPortIsTerminal, 0);
   if (userdata.port2 == nullptr)
   {
-    std::cout << "Cannot create JACK port" << std::endl;
+    std::cerr << "Cannot create JACK port" << std::endl;
     exit(1);
   }
 
@@ -87,7 +96,7 @@ int main()
       JackPortIsOutput | JackPortIsTerminal, 0);
   if (userdata.port3 == nullptr)
   {
-    std::cout << "Cannot create JACK port" << std::endl;
+    std::cerr << "Cannot create JACK port" << std::endl;
     exit(1);
   }
 
@@ -96,19 +105,19 @@ int main()
       JackPortIsOutput | JackPortIsTerminal, 0);
   if (userdata.port4 == nullptr)
   {
-    std::cout << "Cannot create JACK port" << std::endl;
+    std::cerr << "Cannot create JACK port" << std::endl;
     exit(1);
   }
 
   if (jack_set_sync_callback(userdata.client, sync_callback, &userdata) != 0)
   {
-    std::cout << "Cannot set sync callback" << std::endl;
+    std::cerr << "Cannot set sync callback" << std::endl;
     exit(1);
   }
 
   if (jack_set_process_callback(userdata.client, process_callback, &userdata) != 0)
   {
-    std::cout << "Cannot set process callback" << std::endl;
+    std::cerr << "Cannot set process callback" << std::endl;
     exit(1);
   }
 
@@ -116,7 +125,7 @@ int main()
 
   if (jack_activate(userdata.client) != 0)
   {
-    std::cout << "Cannot activate JACK client" << std::endl;
+    std::cerr << "Cannot activate JACK client" << std::endl;
     exit(1);
   }
 
