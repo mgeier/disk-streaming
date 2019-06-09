@@ -5,8 +5,8 @@ use failure::Error;
 use disk_streaming::file::{converter::Converter, vorbis, AudioFileBasics, AudioFileBlocks, Block};
 
 fn main() -> Result<(), Error> {
-    //let file = fs::File::open("ukewave.ogg")?;
-    let file = fs::File::open("marimba.ogg")?;
+    //let file = fs::File::open("examples/ukewave.ogg")?;
+    let file = fs::File::open("examples/marimba.ogg")?;
     let mut af = vorbis::File::new(file)?;
 
     println!("samplerate: {}", af.samplerate());

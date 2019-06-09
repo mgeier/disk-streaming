@@ -13,7 +13,7 @@ fn main() -> Result<(), Error> {
 
     // TODO: get "end" from file length?
 
-    let file = fs::File::open("marimba.ogg")?;
+    let file = fs::File::open("examples/marimba.ogg")?;
     let file = load_audio_file(file, 44_100)?;
     //let file = AudioFile::with_samplerate(file, 48_000)?;
 
