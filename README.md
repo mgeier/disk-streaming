@@ -26,3 +26,12 @@ Running
 * `./example`
 * Connect JACK ports to output ports (e.g. with the `qjackctl` tool)
 * Play around with the JACK transport (e.g. with the `qjackctl` tool)
+
+Updating the C Header File
+--------------------------
+
+The file `disk_streaming.h` was generated with
+[cbindgen](https://crates.io/crates/cbindgen) (`cargo install cbindgen`).
+After changes in the API functions, it can be updated with
+
+* `cbindgen -o disk_streaming.h`
