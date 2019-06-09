@@ -90,6 +90,11 @@ where
         .unwrap_or(-1)
 }
 
+extern "C" fn close_func(_datasource: *mut c_void) -> c_int {
+    // Nothing to do here, "reader" is cleaned up automatically
+    0
+}
+
 #[derive(Debug, Fail)]
 pub struct LibVorbisError(pub i32);
 
@@ -157,7 +162,7 @@ where
         let callbacks = vorbisfile_sys::ov_callbacks {
             read_func: read_func::<R>,
             seek_func: seek_func::<R>,
-            close_func: unsafe { std::mem::zeroed() },
+            close_func: close_func,
             tell_func: tell_func::<R>,
         };
         // TODO: use MaybeUninit::uninit()?
