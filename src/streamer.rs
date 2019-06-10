@@ -1,4 +1,6 @@
-use std::io::{Read, Seek};
+use std::fs;
+use std::io;
+use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -7,9 +9,9 @@ use std::thread;
 use std::time::Duration;
 
 use crossbeam::queue;
-use failure::Error;
+use failure::{Error, Fail};
 
-use crate::file::{converter, vorbis, AudioFileBasics, AudioFileBlocks};
+use crate::file::{converter, vorbis, wav, AudioFileBasics, AudioFileBlocks};
 
 enum Fade {
     In,
@@ -44,21 +46,52 @@ where
     }
 }
 
+#[fail(display = "Could not load audio file:
+Vorbis: {}
+WAV: {}", vorbis_error, wav_error)]
+#[derive(Debug, Fail)]
+struct LoadError {
+    vorbis_error: vorbis::OpenError,
+    wav_error: hound::Error,
+}
+
 // TODO: loop/repeat, skip, duration ...
 
-pub fn load_audio_file<R>(reader: R, samplerate: usize) -> Result<Box<dyn AudioFile + Send>, Error>
+pub fn load_audio_file<P>(path: P, samplerate: usize) -> Result<Box<dyn AudioFile + Send>, Error>
 where
-    R: Read + Seek + Send + 'static,
+    P: AsRef<Path>,
 {
-    let file = vorbis::File::new(reader)?;
+    let file = fs::File::open(&path)?;
+    let vorbis_error = match vorbis::File::new(file) {
+        Ok(file) => {
+            if file.samplerate() == samplerate {
+                return Ok(Box::new(file));
+            } else {
+                return Ok(Box::new(converter::Converter::new(file, samplerate)?));
+            }
+        }
+        Err(e) => e,
+    };
 
-    // TODO: try all available file types (call reader.seek(0) in between)
+    let file = fs::File::open(&path)?;
+    let reader = io::BufReader::new(file);
+    let wav_error = match wav::File::new(reader) {
+        Ok(file) => {
+            if file.samplerate() == samplerate {
+                return Ok(Box::new(file));
+            } else {
+                return Ok(Box::new(converter::Converter::new(file, samplerate)?));
+            }
+        }
+        Err(e) => e
+    };
 
-    if file.samplerate() == samplerate {
-        Ok(Box::new(file))
-    } else {
-        Ok(Box::new(converter::Converter::new(file, samplerate)?))
-    }
+    // TODO: try more file types (FLAC, mp3, ...)
+
+    Err(LoadError {
+        vorbis_error,
+        wav_error,
+    })?
 }
 
 struct Block {
@@ -69,7 +102,7 @@ impl Block {
     fn new(frames: usize, channels: usize) -> Block {
         Block {
             channels: (0..channels)
-                .map(|_| std::iter::repeat(0.0f32).take(frames).collect())
+                .map(|_| (0..frames).map(|_| 0.0f32).collect())
                 .collect(),
         }
     }

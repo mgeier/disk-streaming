@@ -1,8 +1,6 @@
 // http://jakegoulding.com/rust-ffi-omnibus/objects/
 // https://blog.eqrion.net/announcing-cbindgen/
 
-use std::fs;
-
 extern crate failure;
 use failure::Error;
 
@@ -17,8 +15,7 @@ fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreame
     let channels = 4;
     let mut playlist = Vec::new();
 
-    let file = fs::File::open("marimba.ogg")?;
-    let file = load_audio_file(file, samplerate)?;
+    let file = load_audio_file("marimba.ogg", samplerate)?;
     playlist.push(PlaylistEntry {
         start: 0,
         end: Some(file.frames()),
@@ -26,8 +23,7 @@ fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreame
         channels: Box::new([Some(0), Some(1)]),
     });
 
-    let file = fs::File::open("marimba.ogg")?;
-    let file = load_audio_file(file, samplerate)?;
+    let file = load_audio_file("marimba.ogg", samplerate)?;
     playlist.push(PlaylistEntry {
         start: 3 * 44_100,
         end: Some(file.frames() + 3 * 44_100),
@@ -35,13 +31,20 @@ fn load_file_streamer(blocksize: usize, samplerate: usize) -> Result<FileStreame
         channels: Box::new([Some(2), Some(3)]),
     });
 
-    let file = fs::File::open("ukewave.ogg")?;
-    let file = load_audio_file(file, samplerate)?;
+    let file = load_audio_file("ukewave.ogg", samplerate)?;
     playlist.push(PlaylistEntry {
         start: 4 * 44_100,
         end: Some(file.frames() + 4 * 44_100),
         file,
         channels: Box::new([Some(1)]),
+    });
+
+    let file = load_audio_file("xmas.wav", samplerate)?;
+    playlist.push(PlaylistEntry {
+        start: 5 * 44_100,
+        end: Some(file.frames() + 5 * 44_100),
+        file,
+        channels: Box::new([Some(0)]),
     });
 
     Ok(FileStreamer::new(playlist, blocksize, channels))

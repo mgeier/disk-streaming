@@ -12,6 +12,8 @@ where
     current_block: Block,
 }
 
+unsafe impl<R: Read + Seek + Send> Send for File<R> {}
+
 impl<R> File<R>
 where
     R: Read + Seek,

@@ -1,4 +1,3 @@
-use std::fs;
 use std::thread;
 use std::time::Duration;
 
@@ -13,9 +12,7 @@ fn main() -> Result<(), Error> {
 
     // TODO: get "end" from file length?
 
-    let file = fs::File::open("examples/marimba.ogg")?;
-    let file = load_audio_file(file, 44_100)?;
-    //let file = AudioFile::with_samplerate(file, 48_000)?;
+    let file = load_audio_file("examples/marimba.ogg", 44_100)?;
 
     playlist.push(PlaylistEntry {
         start: 0,
