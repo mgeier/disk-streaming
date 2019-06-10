@@ -257,14 +257,14 @@ where
 {
     type Block = Block;
 
-    fn next_block(&mut self, max_len: usize) -> Result<&mut Block, Error> {
+    fn next_block(&mut self, max_frames: usize) -> Result<&mut Block, Error> {
         let mut current_section: c_int = 0;
         let result: c_long = unsafe {
             // https://xiph.org/vorbis/doc/vorbisfile/ov_read_float.html
             vorbisfile_sys::ov_read_float(
                 &mut self.ov_struct,
                 &mut self.current_block.ptr,
-                max_len as c_int,
+                max_frames as c_int,
                 &mut current_section, // Result is ignored
             )
         };

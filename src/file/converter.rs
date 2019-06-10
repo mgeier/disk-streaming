@@ -200,7 +200,7 @@ where
 {
     type Block = Block;
 
-    fn next_block(&mut self, max_len: usize) -> Result<&mut Block, Error> {
+    fn next_block(&mut self, max_frames: usize) -> Result<&mut Block, Error> {
         let channels = self.file.channels();
 
         // We might have to call src_process() multiple times to get some data out
@@ -223,7 +223,7 @@ where
             // Call libsamplerate to get new output data
 
             self.data.output_frames =
-                std::cmp::min(self.buffer_out.len() / channels, max_len) as c_long;
+                std::cmp::min(self.buffer_out.len() / channels, max_frames) as c_long;
             // http://www.mega-nerd.com/SRC/api_full.html#Process
             let result = unsafe { libsamplerate_sys::src_process(self.state, &mut self.data) };
             if result != 0 {

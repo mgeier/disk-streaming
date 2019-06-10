@@ -4,26 +4,27 @@ use failure::Error;
 
 pub mod converter;
 pub mod vorbis;
+pub mod wav;
 
 pub trait AudioFileBasics {
-    fn samplerate(&self) -> usize;
     fn channels(&self) -> usize;
     fn frames(&self) -> usize;
+    fn samplerate(&self) -> usize;
     fn seek(&mut self, frame: usize) -> Result<(), Error>;
 }
 
 pub trait AudioFileBlocks {
     type Block: Block;
 
-    fn next_block(&mut self, frames: usize) -> Result<&mut Self::Block, Error>;
+    fn next_block(&mut self, max_frames: usize) -> Result<&mut Self::Block, Error>;
 
     /// Panics if `buffer` is not long enough.
     fn copy_block_to_interleaved(
         &mut self,
-        frames: usize,
+        max_frames: usize,
         buffer: &mut [f32],
     ) -> Result<usize, Error> {
-        let block = self.next_block(frames)?;
+        let block = self.next_block(max_frames)?;
         let frames = block.frames();
         let iterators = block.channel_iterators();
         let channels = iterators.len();
@@ -80,6 +81,7 @@ pub trait AudioFileBlocks {
 }
 
 pub trait Block {
+    // TODO: IntoIterator?
     type Channel: Iterator<Item = f32>;
     fn channel_iterators(&mut self) -> &mut [Self::Channel];
     fn frames(&self) -> usize;
