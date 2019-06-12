@@ -35,6 +35,7 @@ where
     B: crate::file::Block,
     F: AudioFileBlocks<Block = B> + AudioFileBasics,
 {
+    // This is a non-generic version of AudioFileBlocks::fill_channels():
     fn fill_channels(
         &mut self,
         channel_map: &[Option<usize>],

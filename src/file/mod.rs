@@ -81,7 +81,6 @@ pub trait AudioFileBlocks {
 }
 
 pub trait Block {
-    // TODO: IntoIterator?
     type Channel: Iterator<Item = f32>;
     fn channel_iterators(&mut self) -> &mut [Self::Channel];
     fn frames(&self) -> usize;
