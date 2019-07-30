@@ -37,6 +37,6 @@ Updating the C Header File
 
 The file `disk_streaming.h` was generated with
 [cbindgen](https://crates.io/crates/cbindgen) (`cargo install cbindgen`).
-After changes in the API functions, it can be updated with
+After changes in the API functions (in `ffi/src/lib.rs`), it can be updated with
 
 * `cbindgen ffi -o ffi/disk_streaming.h`
