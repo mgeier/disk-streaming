@@ -5,6 +5,9 @@ This is a proof-of-concept implementation.
 If successful, it will be incorporated in a Rust implementation of the ASDF
 (https://github.com/AudioSceneDescriptionFormat).
 
+UPDATE: This has been incorporated into
+https://github.com/AudioSceneDescriptionFormat/asdf-rust.
+
 Requirements
 ------------
 
